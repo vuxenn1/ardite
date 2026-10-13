@@ -96,9 +96,9 @@ function friendlyError(raw) {
   const msg = (raw || '').replace(/^ERROR:\s*/, '').trim();
   const rules = [
     [/Unsupported URL/i, 'This site or link isn\'t supported.'],
-    [/Sign in to confirm (your age|you.re not a bot)/i, 'YouTube wants you to sign in. Adding cookies should fix it (see the Cookies section in README.md).'],
+    [/Sign in to confirm (your age|you.re not a bot)/i, 'YouTube wants you to sign in. Adding cookies should fix it (see README.md).'],
     [/private video|This video is private/i, 'This video is private.'],
-    [/login required|requires? (a )?log ?in|rate-limit reached|cookies/i, 'This content requires login. Adding cookies should fix it (see the Cookies section in README.md).'],
+    [/login required|requires? (a )?log ?in|rate-limit reached|cookies/i, 'This content requires login. Adding cookies should fix it (see README.md).'],
     [/Requested format is not available/i, 'That quality isn\'t available for this video. Try another one.'],
     [/Video unavailable|not available|has been removed|404/i, 'Video not found or removed.'],
     [/Unable to download webpage|getaddrinfo|timed out|Connection/i, 'Couldn\'t reach the site. Check your internet connection.'],
