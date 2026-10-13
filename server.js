@@ -1,0 +1,895 @@
+// Ardite — a self-hosted video downloader for your home network.
+// Downloads with yt-dlp into a temp folder, then streams the file to whichever
+// device made the request (the PC itself or a phone on the same Wi-Fi).
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import crypto from 'node:crypto';
+import { spawn, execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { createZip, fileCrc32 } from './zip.js';
+
+const ROOT = path.dirname(fileURLToPath(import.meta.url));
+const PUBLIC = path.join(ROOT, 'public');
+const DATA = path.join(ROOT, 'data');
+const BIN = path.join(ROOT, 'bin');
+const EXE = process.platform === 'win32' ? '.exe' : '';
+const YTDLP = path.join(BIN, 'yt-dlp' + EXE);
+const WORK = path.join(os.tmpdir(), 'ardite-jobs');
+const LOG_FILE = path.join(DATA, 'ardite.log');
+
+fs.mkdirSync(DATA, { recursive: true });
+
+const config = {
+  port: 7878,
+  host: '0.0.0.0',
+  maxConcurrent: 2,
+  keepFilesMinutes: 30,
+  maxPlaylistItems: 500,
+  cookiesFromBrowser: '', // e.g. "firefox" — for sites that require login
+  ...readJson(path.join(DATA, 'config.json')),
+};
+if (process.env.PORT) config.port = Number(process.env.PORT);
+const COOKIES_FILE = path.join(DATA, 'cookies.txt');
+
+// ---------- logging ----------
+
+try {
+  if (fs.statSync(LOG_FILE).size > 1024 * 1024) fs.rmSync(LOG_FILE);
+} catch { /* no log yet */ }
+
+function log(...parts) {
+  const line = `[${new Date().toLocaleString('en-GB')}] ${parts.join(' ')}`;
+  console.log(line);
+  fs.appendFile(LOG_FILE, line + '\n', () => {});
+}
+
+function readJson(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+// ---------- helpers ----------
+
+function lanAddresses() {
+  const skip = /vEthernet|VirtualBox|VMware|WSL|Docker|Loopback|WARP|Cloudflare|Tailscale|ZeroTier|Hamachi|Bluetooth/i;
+  const list = [];
+  for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
+    if (skip.test(name)) continue;
+    for (const a of addrs || []) {
+      if (a.family !== 'IPv4' || a.internal || a.address.startsWith('169.254.')) continue;
+      list.push(a.address);
+    }
+  }
+  const rank = (ip) => (ip.startsWith('192.168.') ? 0 : ip.startsWith('10.') ? 1 : 2);
+  return list.sort((a, b) => rank(a) - rank(b));
+}
+
+function commonArgs() {
+  const args = [
+    '--no-warnings',
+    '--no-colors',
+    '--ffmpeg-location', BIN,
+    // YouTube needs a JavaScript runtime for signature solving; reuse the Node we're running on
+    '--js-runtimes', `node:${process.execPath}`,
+  ];
+  if (fs.existsSync(COOKIES_FILE)) args.push('--cookies', COOKIES_FILE);
+  else if (config.cookiesFromBrowser) args.push('--cookies-from-browser', config.cookiesFromBrowser);
+  return args;
+}
+
+function isValidUrl(value) {
+  try {
+    const u = new URL(value);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+// Turns yt-dlp errors into short, human-readable messages
+function friendlyError(raw) {
+  const msg = (raw || '').replace(/^ERROR:\s*/, '').trim();
+  const rules = [
+    [/Unsupported URL/i, 'This site or link isn\'t supported.'],
+    [/Sign in to confirm (your age|you.re not a bot)/i, 'YouTube wants you to sign in. Adding cookies should fix it (see the Cookies section in README.md).'],
+    [/private video|This video is private/i, 'This video is private.'],
+    [/login required|requires? (a )?log ?in|rate-limit reached|cookies/i, 'This content requires login. Adding cookies should fix it (see the Cookies section in README.md).'],
+    [/Requested format is not available/i, 'That quality isn\'t available for this video. Try another one.'],
+    [/Video unavailable|not available|has been removed|404/i, 'Video not found or removed.'],
+    [/Unable to download webpage|getaddrinfo|timed out|Connection/i, 'Couldn\'t reach the site. Check your internet connection.'],
+    [/No video formats found|There is no video in this post|No video could be found/i, 'No downloadable video found at this link.'],
+    [/Not found/i, 'Video not found or removed.'],
+  ];
+  for (const [re, text] of rules) if (re.test(msg)) return { message: text, detail: msg };
+  return { message: 'Download failed.', detail: msg || 'Unknown error' };
+}
+
+function lastError(stderr) {
+  const lines = stderr.split(/\r?\n/).filter((l) => l.startsWith('ERROR:'));
+  return lines.length ? lines[lines.length - 1] : stderr.trim().split(/\r?\n/).pop();
+}
+
+function killTree(proc) {
+  if (!proc || proc.exitCode !== null) return;
+  if (process.platform === 'win32') {
+    execFile('taskkill', ['/pid', String(proc.pid), '/T', '/F'], () => {});
+  } else {
+    proc.kill('SIGKILL');
+  }
+}
+
+// ---------- info (preview) ----------
+
+// The JSON fetched for the preview is reused for the download, so downloads start faster.
+const infoCache = new Map(); // url -> { file, time }
+const INFO_TTL = 20 * 60 * 1000;
+
+function fetchInfo(url, playlist) {
+  return new Promise((resolve, reject) => {
+    const args = [...commonArgs(), '-J', '--flat-playlist', playlist ? '--yes-playlist' : '--no-playlist', '--', url];
+    const proc = spawn(YTDLP, args, { windowsHide: true });
+    let out = '';
+    let err = '';
+    const timer = setTimeout(() => killTree(proc), 120000);
+    proc.stdout.on('data', (d) => (out += d));
+    proc.stderr.on('data', (d) => (err += d));
+    proc.on('error', (e) => {
+      clearTimeout(timer);
+      reject(friendlyError(e.message));
+    });
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) return reject(friendlyError(lastError(err)));
+      try {
+        resolve({ json: out, info: JSON.parse(out) });
+      } catch {
+        reject(friendlyError('Invalid response'));
+      }
+    });
+  });
+}
+
+function bestThumb(thumbs) {
+  if (!Array.isArray(thumbs) || !thumbs.length) return null;
+  const sized = thumbs.filter((t) => t.url && t.width);
+  if (sized.length) return sized.reduce((a, b) => (b.width > a.width ? b : a)).url;
+  return thumbs.filter((t) => t.url).pop()?.url || null;
+}
+
+function summarizeVideo(info) {
+  const heights = new Set();
+  let hasAudio = false;
+  let hasVideo = false;
+  for (const f of info.formats || []) {
+    const v = f.vcodec && f.vcodec !== 'none';
+    const a = f.acodec && f.acodec !== 'none';
+    if (v || (!f.vcodec && f.height)) {
+      hasVideo = true;
+      // "res" in yt-dlp is the smaller side, so vertical 1080x1920 counts as 1080p
+      const h = Math.min(f.height || 0, f.width || f.height || 0) || f.height;
+      if (h) heights.add(h);
+    }
+    if (a) hasAudio = true;
+  }
+  if (!info.formats?.length) {
+    hasVideo = !!(info.height || info.vcodec !== 'none');
+    hasAudio = true;
+  }
+  return {
+    type: 'video',
+    title: info.title || info.id,
+    uploader: info.uploader || info.channel || info.creator || null,
+    duration: info.duration || null,
+    thumbnail: info.thumbnail || bestThumb(info.thumbnails),
+    site: info.extractor_key || info.extractor || null,
+    heights: [...heights].filter((h) => h >= 144).sort((a, b) => b - a),
+    hasVideo,
+    hasAudio,
+  };
+}
+
+function entryUrl(e) {
+  if (isValidUrl(e.url)) return e.url;
+  if (isValidUrl(e.webpage_url)) return e.webpage_url;
+  if (e.id && /youtube/i.test(e.ie_key || '')) return `https://www.youtube.com/watch?v=${e.id}`;
+  return null;
+}
+
+function summarizePlaylist(info) {
+  const entries = [];
+  for (const [i, e] of (info.entries || []).entries()) {
+    if (!e) continue;
+    const url = entryUrl(e);
+    if (!url) continue;
+    const title = e.title || e.id || url;
+    entries.push({
+      index: i + 1,
+      url,
+      title,
+      duration: e.duration || null,
+      thumbnail: bestThumb(e.thumbnails) || e.thumbnail || null,
+      // private/deleted videos and nested playlists (e.g. channel tabs) can't be downloaded as one file
+      unavailable: /^\[(private|deleted|unavailable)( video)?\]$/i.test(title)
+        || e._type === 'playlist' || /Tab$/.test(e.ie_key || ''),
+    });
+  }
+  return {
+    type: 'playlist',
+    title: info.title || 'Playlist',
+    uploader: info.uploader || info.channel || null,
+    site: info.extractor_key || info.extractor || null,
+    count: entries.length,
+    thumbnail: entries.find((e) => !e.unavailable && e.thumbnail)?.thumbnail || bestThumb(info.thumbnails),
+    entries: entries.slice(0, config.maxPlaylistItems),
+    truncated: entries.length > config.maxPlaylistItems,
+  };
+}
+
+function cacheInfo(url, json) {
+  const file = path.join(WORK, 'info-' + crypto.createHash('sha1').update(url).digest('hex') + '.json');
+  fs.writeFileSync(file, json);
+  infoCache.set(url, { file, time: Date.now() });
+}
+
+// Links like youtube.com/watch?v=X&list=Y are both a video and a playlist
+function linkKind(url) {
+  const u = new URL(url);
+  const list = u.searchParams.has('list') || /\/(playlist|sets|album)s?\b/i.test(u.pathname);
+  const video = u.searchParams.has('v') || /(^|\.)youtu\.be$/i.test(u.hostname) || /\/shorts\//.test(u.pathname);
+  return { list, video };
+}
+
+async function getInfo(url) {
+  const kind = linkKind(url);
+  if (!kind.list) {
+    const res = await fetchInfo(url, false);
+    if (res.info._type === 'playlist') return summarizePlaylist(res.info);
+    cacheInfo(url, res.json);
+    return summarizeVideo(res.info);
+  }
+
+  const [list, single] = await Promise.allSettled([
+    fetchInfo(url, true),
+    kind.video ? fetchInfo(url, false) : Promise.reject(null),
+  ]);
+  const video = single.status === 'fulfilled' && single.value.info._type !== 'playlist' ? single.value : null;
+  if (video) cacheInfo(url, video.json);
+
+  if (list.status === 'fulfilled' && list.value.info._type === 'playlist') {
+    const summary = summarizePlaylist(list.value.info);
+    if (video) summary.video = summarizeVideo(video.info);
+    return summary;
+  }
+  if (video) return summarizeVideo(video.info);
+  throw list.reason;
+}
+
+// ---------- download jobs ----------
+
+const jobs = new Map();
+const batches = new Map();
+const queue = [];
+let running = 0;
+
+const AUDIO_FORMATS = ['mp3', 'm4a', 'opus', 'wav', 'best'];
+const isFinal = (status) => status === 'done' || status === 'error' || status === 'canceled';
+
+function publicJob(job) {
+  return {
+    id: job.id,
+    url: job.url,
+    mode: job.opts.mode,
+    status: job.status,
+    phase: job.phase,
+    progress: job.progress,
+    title: job.title,
+    fileName: job.fileName,
+    size: job.size,
+    error: job.error,
+  };
+}
+
+function emit(job, force = false) {
+  if (job.batch) emitBatch(job.batch, force);
+  const now = Date.now();
+  if (!force && now - job.lastEmit < 250) return;
+  job.lastEmit = now;
+  const data = `data: ${JSON.stringify(publicJob(job))}\n\n`;
+  for (const res of job.listeners) res.write(data);
+}
+
+function buildArgs(job, source) {
+  const o = job.opts;
+  const name = (job.prefix ? `${job.prefix} - ` : '') + '%(title).150B [%(id)s].%(ext)s';
+  const args = [
+    ...commonArgs(),
+    '--no-playlist',
+    '--newline',
+    '--progress',
+    '--progress-delta', '0.4',
+    '--progress-template',
+    'download:ARDITE|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|%(info.vcodec)s|%(info.acodec)s',
+    '-o', path.join(job.dir, name),
+  ];
+
+  if (o.mode === 'audio') {
+    args.push('-f', 'ba/b', '-x', '--audio-quality', '0', '--embed-metadata');
+    if (o.audioFormat !== 'best') args.push('--audio-format', o.audioFormat);
+    if (o.audioFormat !== 'wav') args.push('--embed-thumbnail');
+  } else {
+    const res = o.quality === 'max' ? '' : `res:${o.quality}`;
+    if (o.codec === 'h264') {
+      // Prefer H.264 + AAC MP4, which plays everywhere (iPhone included).
+      // An explicitly chosen quality wins over the codec (picking 4K gets 4K).
+      args.push('-S', [res, 'vcodec:h264', 'acodec:aac'].filter(Boolean).join(','), '--merge-output-format', 'mp4');
+    } else {
+      // Prefer AAC audio: Opus can't go into MP4, which would force MKV (bad on phones)
+      args.push('-S', [res, 'acodec:aac'].filter(Boolean).join(','), '--merge-output-format', 'mp4/mkv');
+    }
+  }
+
+  if (source.infoFile) args.push('--load-info-json', source.infoFile);
+  else args.push('--', job.url);
+  return args;
+}
+
+function parseProgress(job, line) {
+  const [, done, total, estimate, speed, eta, vcodec, acodec] = line.split('|');
+  const num = (v) => (v && v !== 'NA' && v !== 'None' ? Number(v) : null);
+  const t = num(total) ?? num(estimate);
+  const d = num(done);
+  const isAudioPart = vcodec === 'none' && acodec !== 'none';
+  const isVideoPart = acodec === 'none' && vcodec !== 'none';
+  job.status = 'running';
+  job.phase = job.opts.mode === 'audio' || isAudioPart ? 'Downloading audio'
+    : isVideoPart ? 'Downloading video' : 'Downloading';
+  job.progress = {
+    percent: t && d != null ? Math.min(100, (d / t) * 100) : null,
+    downloaded: d,
+    total: t,
+    speed: num(speed),
+    eta: num(eta),
+  };
+  emit(job);
+}
+
+function parseLog(job, line) {
+  const stages = [
+    [/^\[Merger\]/, 'Merging video and audio'],
+    [/^\[ExtractAudio\]/, 'Converting audio'],
+    [/^\[(EmbedThumbnail|Metadata)\]/, 'Adding cover art'],
+    [/^\[(Fixup\w*|VideoRemuxer|VideoConvertor)\]/, 'Finishing up'],
+  ];
+  for (const [re, phase] of stages) {
+    if (re.test(line)) {
+      job.phase = phase;
+      job.status = 'processing';
+      job.progress = { ...job.progress, percent: null };
+      emit(job, true);
+      return;
+    }
+  }
+}
+
+function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
+  job.status = 'running';
+  job.phase = 'Starting';
+  emit(job, true);
+  fs.mkdirSync(job.dir, { recursive: true });
+
+  const proc = spawn(YTDLP, buildArgs(job, source), { windowsHide: true });
+  job.proc = proc;
+  let stderr = '';
+  let buffer = '';
+
+  proc.stdout.setEncoding('utf8');
+  proc.stdout.on('data', (chunk) => {
+    buffer += chunk;
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (line.startsWith('ARDITE|')) parseProgress(job, line);
+      else parseLog(job, line);
+    }
+  });
+  proc.stderr.setEncoding('utf8');
+  proc.stderr.on('data', (d) => (stderr += d));
+
+  proc.on('close', (code) => {
+    job.proc = null;
+    if (job.status === 'canceled') return finish(job);
+
+    if (code !== 0 && source.infoFile) {
+      // The cached info may be stale (e.g. expired stream URLs) — retry from the link
+      log(`[${job.id}] cached info failed, retrying from link`);
+      infoCache.delete(job.url);
+      fs.rmSync(job.dir, { recursive: true, force: true });
+      return runJob(job, {});
+    }
+
+    // YouTube sometimes answers 403 on a stream URL for a moment; a fresh attempt usually works
+    const transient = /HTTP Error (403|5\d\d)|Connection reset|timed out|IncompleteRead/i.test(stderr);
+    if (code !== 0 && transient && (job.attempts = (job.attempts || 0) + 1) <= 2) {
+      log(`[${job.id}] transient error, retry ${job.attempts}/2`);
+      fs.rmSync(job.dir, { recursive: true, force: true });
+      job.phase = 'Retrying';
+      emit(job, true);
+      return setTimeout(() => (job.status === 'canceled' ? finish(job) : runJob(job, {})), 3000 * job.attempts);
+    }
+
+    if (code !== 0) {
+      job.status = 'error';
+      job.error = friendlyError(lastError(stderr));
+      log(`[${job.id}] ERROR: ${job.error.detail}`);
+      fs.rmSync(job.dir, { recursive: true, force: true });
+      return finish(job);
+    }
+
+    const files = fs.readdirSync(job.dir)
+      .filter((f) => !/\.(part|ytdl|temp|json|webp|jpg|png)$/i.test(f) && !f.includes('.part-Frag'))
+      .map((f) => ({ f, size: fs.statSync(path.join(job.dir, f)).size }))
+      .sort((a, b) => b.size - a.size);
+
+    if (!files.length) {
+      job.status = 'error';
+      job.error = { message: 'No file was produced.', detail: stderr.slice(-500) };
+      return finish(job);
+    }
+
+    job.file = path.join(job.dir, files[0].f);
+    job.fileName = files[0].f;
+    job.size = files[0].size;
+    job.title = job.title || path.parse(files[0].f).name.replace(/ \[[^\]]+\]$/, '');
+    job.status = 'done';
+    job.phase = 'Ready';
+    job.progress = { ...job.progress, percent: 100 };
+    log(`[${job.id}] done: ${job.fileName} (${(job.size / 1048576).toFixed(1)} MB)`);
+    finish(job);
+  });
+
+  proc.on('error', (e) => {
+    job.status = 'error';
+    job.error = friendlyError(e.message);
+    finish(job);
+  });
+}
+
+function finish(job) {
+  running--;
+  emit(job, true);
+  for (const res of job.listeners) res.end();
+  job.listeners.clear();
+  if (job.batch) {
+    // Playlist items are kept until the whole playlist is done, so the ZIP has everything
+    if (job.batch.removed) removeJob(job);
+    else checkBatchDone(job.batch);
+  } else {
+    const keep = job.status === 'done' ? config.keepFilesMinutes * 60000 : 10 * 60000;
+    job.cleanup = setTimeout(() => removeJob(job), keep);
+  }
+  pump();
+}
+
+function removeJob(job) {
+  clearTimeout(job.cleanup);
+  fs.rm(job.dir, { recursive: true, force: true }, () => {});
+  jobs.delete(job.id);
+}
+
+function cancelJob(job) {
+  if (isFinal(job.status)) return;
+  const wasQueued = job.status === 'queued';
+  job.status = 'canceled';
+  job.phase = 'Canceled';
+  if (wasQueued) emit(job, true);
+  else killTree(job.proc); // finish() runs when the process exits
+}
+
+function pump() {
+  while (running < config.maxConcurrent && queue.length) {
+    const job = queue.shift();
+    if (job.status !== 'queued') continue;
+    running++;
+    runJob(job);
+  }
+}
+
+function parseOptions(body) {
+  return {
+    mode: body.mode === 'audio' ? 'audio' : 'video',
+    quality: /^\d{3,4}$/.test(String(body.quality)) ? String(body.quality) : 'max',
+    codec: body.codec === 'best' ? 'best' : 'h264',
+    audioFormat: AUDIO_FORMATS.includes(body.audioFormat) ? body.audioFormat : 'mp3',
+  };
+}
+
+function createJob(url, opts, extra = {}) {
+  const id = crypto.randomBytes(6).toString('hex');
+  const job = {
+    id,
+    url,
+    opts,
+    status: 'queued',
+    phase: 'Queued',
+    progress: { percent: null },
+    title: typeof extra.title === 'string' ? extra.title.slice(0, 300) : null,
+    prefix: extra.prefix || null,
+    batch: extra.batch || null,
+    dir: path.join(WORK, id),
+    listeners: new Set(),
+    lastEmit: 0,
+  };
+  jobs.set(id, job);
+  queue.push(job);
+  if (!job.batch) log(`[${id}] new job: ${opts.mode} ${opts.quality}/${opts.codec}/${opts.audioFormat} ${url}`);
+  pump();
+  return job;
+}
+
+// ---------- playlists (batches) ----------
+
+function publicBatch(batch) {
+  const items = batch.jobs.map((j) => ({
+    id: j.id,
+    title: j.title,
+    status: j.status,
+    phase: j.phase,
+    percent: j.progress?.percent ?? null,
+    size: j.size ?? null,
+    error: j.error?.message ?? null,
+  }));
+  const count = (s) => items.filter((i) => i.status === s).length;
+  const active = items.filter((i) => i.status !== 'canceled');
+  const progressSum = active.reduce((n, i) => n + (isFinal(i.status) ? 100 : i.percent || 0), 0);
+  return {
+    id: batch.id,
+    url: batch.url,
+    title: batch.title,
+    mode: batch.opts.mode,
+    total: items.length,
+    done: count('done'),
+    failed: count('error'),
+    canceled: count('canceled'),
+    finished: items.every((i) => isFinal(i.status)),
+    percent: active.length ? progressSum / active.length : 100,
+    size: items.reduce((n, i) => n + (i.size || 0), 0),
+    items,
+  };
+}
+
+function emitBatch(batch, force = false) {
+  const now = Date.now();
+  if (!force && now - batch.lastEmit < 600) return;
+  batch.lastEmit = now;
+  const data = `data: ${JSON.stringify(publicBatch(batch))}\n\n`;
+  for (const res of batch.listeners) res.write(data);
+}
+
+function checkBatchDone(batch) {
+  if (!batch.jobs.every((j) => isFinal(j.status))) return;
+  const s = publicBatch(batch);
+  log(`[batch ${batch.id}] finished: ${s.done} ok, ${s.failed} failed, ${s.canceled} canceled`);
+  for (const res of batch.listeners) res.end();
+  batch.listeners.clear();
+  clearTimeout(batch.cleanup);
+  batch.cleanup = setTimeout(() => removeBatch(batch), config.keepFilesMinutes * 60000);
+}
+
+function removeBatch(batch) {
+  batch.removed = true;
+  clearTimeout(batch.cleanup);
+  for (const job of batch.jobs) {
+    if (!isFinal(job.status)) cancelJob(job);
+    // running jobs are removed in finish() once their process exits
+    if (!job.proc) removeJob(job);
+  }
+  batches.delete(batch.id);
+}
+
+function createBatch(body) {
+  const opts = parseOptions(body);
+  const entries = (Array.isArray(body.entries) ? body.entries : [])
+    .filter((e) => e && isValidUrl(e.url))
+    .slice(0, config.maxPlaylistItems);
+  if (!entries.length) throw new Error('No videos selected.');
+
+  const id = crypto.randomBytes(6).toString('hex');
+  const batch = {
+    id,
+    url: body.url,
+    title: String(body.title || 'Playlist').slice(0, 300),
+    opts,
+    jobs: [],
+    listeners: new Set(),
+    lastEmit: 0,
+  };
+  batches.set(id, batch);
+  const width = Math.max(2, String(Math.max(...entries.map((e, i) => Number(e.index) || i + 1))).length);
+  for (const [i, e] of entries.entries()) {
+    const prefix = String(Number(e.index) || i + 1).padStart(width, '0');
+    batch.jobs.push(createJob(e.url, opts, { title: e.title, prefix, batch }));
+  }
+  log(`[batch ${id}] new playlist: ${entries.length} items, ${opts.mode} — ${batch.title}`);
+  return batch;
+}
+
+async function serveZip(req, res, batch) {
+  const done = batch.jobs.filter((j) => j.status === 'done' && j.file && fs.existsSync(j.file));
+  if (!done.length) return sendJson(res, 404, { message: 'Nothing finished yet.' });
+  const entries = [];
+  for (const j of done) {
+    j.crc ??= await fileCrc32(j.file);
+    entries.push({ name: j.fileName, path: j.file, size: j.size, crc: j.crc });
+  }
+  const { length, stream } = createZip(entries);
+  const name = batch.title.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'playlist';
+  res.writeHead(200, {
+    'Content-Type': 'application/zip',
+    'Content-Disposition': contentDisposition(name + '.zip'),
+    'Content-Length': length,
+    'Cache-Control': 'no-store',
+  });
+  stream.pipe(res);
+  res.on('close', () => stream.destroy());
+}
+
+// ---------- yt-dlp self-update ----------
+
+let ytdlpVersion = null;
+
+function readVersion() {
+  execFile(YTDLP, ['--version'], { windowsHide: true }, (err, out) => {
+    if (!err) ytdlpVersion = out.trim();
+  });
+}
+
+function updateYtdlp() {
+  if (running > 0) return;
+  execFile(YTDLP, ['-U'], { windowsHide: true, timeout: 180000 }, (err, out) => {
+    const text = (out || '').trim().split(/\r?\n/).pop();
+    if (text) log('yt-dlp update:', text);
+    readVersion();
+  });
+}
+
+// ---------- HTTP ----------
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json',
+};
+
+function sendJson(res, status, data) {
+  res.writeHead(status, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(data));
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (c) => {
+      data += c;
+      if (data.length > 2 * 1024 * 1024) {
+        reject(new Error('too large'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(data || '{}'));
+      } catch {
+        reject(new Error('bad json'));
+      }
+    });
+  });
+}
+
+function contentDisposition(name) {
+  const ascii = name.normalize('NFKD').replace(/[^\x20-\x7e]/g, '').replace(/["\\]/g, '') || 'download';
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
+function serveFile(req, res, job) {
+  if (!job || job.status !== 'done' || !fs.existsSync(job.file)) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('File not found or expired.');
+  }
+  const size = fs.statSync(job.file).size;
+  const headers = {
+    'Content-Type': 'application/octet-stream',
+    'Content-Disposition': contentDisposition(job.fileName),
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'no-store',
+  };
+  const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+  if (range && (range[1] || range[2])) {
+    const start = range[1] ? Number(range[1]) : size - Number(range[2]);
+    let end = range[1] && range[2] ? Number(range[2]) : size - 1;
+    if (start >= size || start < 0 || end < start) {
+      res.writeHead(416, { 'Content-Range': `bytes */${size}` });
+      return res.end();
+    }
+    end = Math.min(end, size - 1);
+    res.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 });
+    return fs.createReadStream(job.file, { start, end }).pipe(res);
+  }
+  res.writeHead(200, { ...headers, 'Content-Length': size });
+  fs.createReadStream(job.file).pipe(res);
+}
+
+function serveStatic(req, res, pathname) {
+  const rel = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).replace(/^\/+/, '');
+  const file = path.normalize(path.join(PUBLIC, rel));
+  if (!file.startsWith(PUBLIC + path.sep)) {
+    res.writeHead(403);
+    return res.end();
+  }
+  fs.readFile(file, (err, data) => {
+    if (err) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('Not found');
+    }
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
+      'Cache-Control': 'no-cache',
+    });
+    res.end(data);
+  });
+}
+
+function openEvents(req, res, target, snapshot, final) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-store',
+    Connection: 'keep-alive',
+  });
+  res.write(`data: ${JSON.stringify(snapshot)}\n\n`);
+  if (final) return res.end();
+  target.listeners.add(res);
+  req.on('close', () => target.listeners.delete(res));
+}
+
+const server = http.createServer(async (req, res) => {
+  const { pathname } = new URL(req.url, 'http://x');
+
+  try {
+    if (pathname === '/api/status' && req.method === 'GET') {
+      return sendJson(res, 200, {
+        name: 'Ardite',
+        ytdlp: ytdlpVersion,
+        port: config.port,
+        lan: lanAddresses().map((ip) => `http://${ip}:${config.port}`),
+        cookies: fs.existsSync(COOKIES_FILE) ? 'file' : config.cookiesFromBrowser || null,
+      });
+    }
+
+    if (pathname === '/api/info' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (!isValidUrl(body.url)) return sendJson(res, 400, { message: 'Enter a valid link.' });
+      try {
+        return sendJson(res, 200, await getInfo(body.url));
+      } catch (e) {
+        return sendJson(res, 422, e?.message ? e : { message: 'Couldn\'t get video info.' });
+      }
+    }
+
+    if (pathname === '/api/jobs' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (!isValidUrl(body.url)) return sendJson(res, 400, { message: 'Enter a valid link.' });
+      return sendJson(res, 201, publicJob(createJob(body.url, parseOptions(body), { title: body.title })));
+    }
+
+    if (pathname === '/api/batches' && req.method === 'POST') {
+      const body = await readBody(req);
+      try {
+        return sendJson(res, 201, publicBatch(createBatch(body)));
+      } catch (e) {
+        return sendJson(res, 400, { message: e.message });
+      }
+    }
+
+    const jm = /^\/api\/jobs\/([a-f0-9]+)(\/(events|file))?$/.exec(pathname);
+    if (jm) {
+      const job = jobs.get(jm[1]);
+      const sub = jm[3];
+      if (!job) {
+        if (sub === 'file') {
+          res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+          return res.end('File not found or expired.');
+        }
+        return sendJson(res, 404, { message: 'Job not found.' });
+      }
+      if (!sub && req.method === 'GET') return sendJson(res, 200, publicJob(job));
+      if (!sub && req.method === 'DELETE') {
+        if (isFinal(job.status)) {
+          if (!job.batch) removeJob(job);
+        } else {
+          cancelJob(job);
+          if (job.status === 'canceled' && !job.proc) job.cleanup = setTimeout(() => removeJob(job), 60000);
+        }
+        return sendJson(res, 200, { ok: true });
+      }
+      if (sub === 'events' && req.method === 'GET') return openEvents(req, res, job, publicJob(job), isFinal(job.status));
+      if (sub === 'file' && (req.method === 'GET' || req.method === 'HEAD')) return serveFile(req, res, job);
+    }
+
+    const bm = /^\/api\/batches\/([a-f0-9]+)(\/(events|zip))?$/.exec(pathname);
+    if (bm) {
+      const batch = batches.get(bm[1]);
+      const sub = bm[3];
+      if (!batch) return sendJson(res, 404, { message: 'Playlist not found.' });
+      if (!sub && req.method === 'GET') return sendJson(res, 200, publicBatch(batch));
+      if (!sub && req.method === 'DELETE') {
+        removeBatch(batch);
+        return sendJson(res, 200, { ok: true });
+      }
+      if (sub === 'events' && req.method === 'GET') {
+        const snap = publicBatch(batch);
+        return openEvents(req, res, batch, snap, snap.finished);
+      }
+      if (sub === 'zip' && req.method === 'GET') return serveZip(req, res, batch);
+    }
+
+    if (req.method === 'GET') return serveStatic(req, res, pathname);
+    res.writeHead(405);
+    res.end();
+  } catch (e) {
+    log('request error:', e.message);
+    if (!res.headersSent) sendJson(res, 400, { message: 'Bad request.' });
+    else res.end();
+  }
+});
+
+// ---------- startup ----------
+
+if (!fs.existsSync(YTDLP)) {
+  console.error('yt-dlp not found. Run the setup first: node setup.js');
+  process.exit(1);
+}
+
+fs.rmSync(WORK, { recursive: true, force: true });
+fs.mkdirSync(WORK, { recursive: true });
+
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    log(`Port ${config.port} is in use — Ardite is probably already running.`);
+    process.exit(0);
+  }
+  throw e;
+});
+
+server.listen(config.port, config.host, () => {
+  log(`Ardite is running → http://localhost:${config.port}`);
+  for (const ip of lanAddresses()) log(`  On your phone: http://${ip}:${config.port}`);
+  readVersion();
+  setTimeout(updateYtdlp, 5000);
+  setInterval(updateYtdlp, 12 * 60 * 60 * 1000);
+  // drop stale preview info
+  setInterval(() => {
+    for (const [url, entry] of infoCache) {
+      if (Date.now() - entry.time > INFO_TTL) {
+        fs.rm(entry.file, { force: true }, () => {});
+        infoCache.delete(url);
+      }
+    }
+  }, 60000);
+});
+
+function shutdown() {
+  for (const job of jobs.values()) killTree(job.proc);
+  fs.rmSync(WORK, { recursive: true, force: true });
+  process.exit(0);
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
