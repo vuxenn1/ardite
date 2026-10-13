@@ -6,7 +6,7 @@
 
 <p align="center">
   A self-hosted video downloader for your Windows PC.<br>
-  Open it from any device on the same Wi-Fi, paste a link, and the file downloads to that device.
+  Open it from any device on the same Wi-Fi, paste a link and the file downloads to that device.
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@
 ## Features
 
 - Works with YouTube, Instagram, TikTok, X and [1000+ other sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)
-- Video up to 4K, or audio only (MP3, M4A, OPUS, WAV)
+- Video up to 4K or audio only (MP3, M4A, OPUS, WAV)
 - Playlists: pick the videos you want and download them as a ZIP
 - Use it from your phone by scanning the QR code on the PC
 
@@ -33,14 +33,14 @@ Requires Windows 10/11 and [Node.js](https://nodejs.org) 20.15 or newer.
 1. Download this repository (**Code > Download ZIP**) and extract it somewhere permanent.
 2. Double-click `install.bat`.
 
-This downloads yt-dlp and ffmpeg, makes Ardite start in the background with Windows, and opens the firewall for your home network.
+This downloads yt-dlp and ffmpeg, makes Ardite start in the background with Windows and opens the firewall for your home network.
 
 ## Usage
 
 - On the PC: open **http://localhost:7878**
 - On a phone (same Wi-Fi): scan the QR code shown on the PC
 
-Paste a link, choose video or audio, and press download.
+Paste a link, choose video or audio and press download.
 
 | Script | What it does |
 |---|---|
