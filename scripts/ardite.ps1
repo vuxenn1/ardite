@@ -1,8 +1,8 @@
 # Ardite management script - the .bat files call this.
-# Usage: ardite.ps1 <start|stop|restart|autostart-on|autostart-off|firewall|uninstall|status>
+# Usage: ardite.ps1 <start|stop|restart|autostart-on|autostart-off|firewall|firewall-off|uninstall|status>
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('start', 'stop', 'restart', 'autostart-on', 'autostart-off', 'firewall', 'uninstall', 'status')]
+  [ValidateSet('start', 'stop', 'restart', 'autostart-on', 'autostart-off', 'firewall', 'firewall-off', 'uninstall', 'status')]
   [string]$Action
 )
 
@@ -111,7 +111,7 @@ function Set-Firewall {
 }
 
 function Remove-Firewall {
-  if (-not (Test-Admin)) { Invoke-Elevated 'uninstall'; return }
+  if (-not (Test-Admin)) { Invoke-Elevated 'firewall-off'; return }
   Remove-NetFirewallRule -DisplayName $RuleName -ErrorAction SilentlyContinue
   Write-Host '  Firewall rule removed.'
   Start-Sleep -Seconds 1
@@ -126,7 +126,7 @@ function Show-Status {
   Write-Host ('  Firewall  : ' + $(if ($rule) { 'allowed' } else { 'no rule' }))
   Write-Host "  This PC   : http://localhost:$Port"
   Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-    Where-Object { $_.InterfaceAlias -notmatch 'vEthernet|Loopback|WARP|Bluetooth|VirtualBox|VMware' -and $_.IPAddress -notlike '169.254.*' -and $_.IPAddress -ne '127.0.0.1' } |
+    Where-Object { $_.InterfaceAlias -notmatch 'vEthernet|VirtualBox|VMware|WSL|Docker|Loopback|WARP|Cloudflare|Tailscale|ZeroTier|Hamachi|Bluetooth' -and $_.IPAddress -notlike '169.254.*' -and $_.IPAddress -ne '127.0.0.1' } |
     ForEach-Object { Write-Host "  Phone     : http://$($_.IPAddress):$Port" }
   Write-Host ''
 }
@@ -138,9 +138,7 @@ switch ($Action) {
   'autostart-on' { Enable-Autostart }
   'autostart-off' { Disable-Autostart }
   'firewall' { Set-Firewall }
-  'uninstall' {
-    if (Test-Admin) { Remove-Firewall; return }
-    Stop-Ardite; Disable-Autostart; Remove-Firewall
-  }
+  'firewall-off' { Remove-Firewall }
+  'uninstall' { Stop-Ardite; Disable-Autostart; Remove-Firewall }
   'status' { Show-Status }
 }

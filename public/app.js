@@ -86,8 +86,9 @@ function fmtDuration(sec) {
 
 function fmtEta(sec) {
   if (sec == null || !isFinite(sec)) return '';
-  if (sec < 60) return `${Math.max(1, Math.round(sec))}s left`;
-  return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s left`;
+  sec = Math.max(1, Math.round(sec));
+  if (sec < 60) return `${sec}s left`;
+  return `${Math.floor(sec / 60)}m ${sec % 60}s left`;
 }
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -159,6 +160,7 @@ function updateInputButtons() {
 }
 
 function resetPreview() {
+  clearTimeout(previewTimer);
   previewSeq++;
   preview = null;
   previewEl.hidden = true;
@@ -329,9 +331,7 @@ input.addEventListener('input', () => schedulePreview());
 input.addEventListener('paste', () => setTimeout(() => schedulePreview(true), 0));
 
 $('#clearBtn').addEventListener('click', () => {
-  input.value = '';
-  resetPreview();
-  updateInputButtons();
+  clearInput();
   input.focus();
 });
 
@@ -342,7 +342,7 @@ $('#pasteBtn').addEventListener('click', async () => {
     input.value = url;
     schedulePreview(true);
   } catch {
-    toast('Couldn\'t read the clipboard — paste the link manually.');
+    toast('Couldn\'t read the clipboard. Paste the link manually.');
   }
 });
 
@@ -419,7 +419,7 @@ function renderOpts() {
   if (settings.codec === 'h264' && selected === 'max') {
     hint.hidden = false;
     hint.replaceChildren(
-      'Auto picks the best MP4 that plays everywhere (usually 1080p on YouTube). For 4K, pick 4K or switch to “Highest quality” in ',
+      'Auto picks the best MP4 that plays everywhere (usually 1080p on YouTube). For 4K, pick 4K or switch to "Highest quality" in ',
       h('button', { type: 'button', onclick: openSettings }, 'Settings'), '.');
   }
 }
@@ -496,7 +496,7 @@ function connect(task) {
   es.onmessage = (e) => update(task, JSON.parse(e.data));
   es.onerror = async () => {
     if (taskFinished(task)) return es.close();
-    // connection dropped (e.g. phone screen locked) — is the task still there?
+    // connection dropped (e.g. phone screen locked), check if the task still exists
     try {
       update(task, await api(taskPath(task)));
     } catch (err) {
@@ -517,7 +517,7 @@ function update(task, data) {
 
   if (task.kind === 'batch') {
     addHistory({ kind: 'playlist', url: task.meta.url, mode: task.meta.mode, title: data.title, count: data.done, size: data.size });
-    toast(data.failed ? `Playlist ready — ${data.failed} failed.` : 'Playlist ready.');
+    toast(data.failed ? `Playlist ready, ${data.failed} failed.` : 'Playlist ready.');
   } else if (data.status === 'done') {
     addHistory({ kind: 'video', url: task.meta.url, mode: task.meta.mode, title: data.title || task.meta.title, size: data.size, ext: (data.fileName || '').split('.').pop() });
     if (settings.autoSave && !task.saved) saveTask(task);
@@ -575,7 +575,8 @@ function closeButton(task) {
   return h('button', {
     type: 'button', class: 'icon-btn ghost',
     'aria-label': final ? 'Remove' : 'Cancel', title: final ? 'Remove' : 'Cancel',
-    onclick: () => (final ? (task.kind === 'batch' ? cancelTask(task) : removeTask(task)) : cancelTask(task)),
+    // finished batches are deleted on the server too, to free the disk space right away
+    onclick: () => (final && task.kind !== 'batch' ? removeTask(task) : cancelTask(task)),
   }, icon('close'));
 }
 
@@ -645,8 +646,7 @@ function renderBatch(task) {
       h('button', { type: 'button', class: 'secondary-btn', onclick: () => saveAll(task) }, icon('save'), 'Save all'));
   }
 
-  const oldList = $('.items', task.el);
-  const scroll = oldList?.scrollTop || 0;
+  const scroll = $('.items', task.el)?.scrollTop || 0;
   const list = task.expanded ? h('ul', { class: 'items' }, d.items.map((i) => h('li', {},
     h('div', { style: 'min-width:0' },
       h('div', { class: 'it-name', title: i.title || '' }, i.title || 'Video'),
@@ -673,16 +673,17 @@ function renderBatch(task) {
 
 async function restoreTasks() {
   const saved = store.get('tasks', []);
-  for (const item of saved) {
-    try {
-      const data = await api(`/api/${item.kind === 'batch' ? 'batches' : 'jobs'}/${item.id}`);
-      addTask(item.kind, data, item.meta, item.saved, true);
-    } catch { /* expired */ }
-  }
+  const results = await Promise.allSettled(saved.map((item) => api(`/api/${item.kind === 'batch' ? 'batches' : 'jobs'}/${item.id}`)));
+  results.forEach((r, i) => {
+    // rejected ones have expired on the server
+    if (r.status === 'fulfilled') addTask(saved[i].kind, r.value, saved[i].meta, saved[i].saved, true);
+  });
   persistTasks();
 }
 
 // ---------- history ----------
+
+const fmtDate = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 function addHistory(entry) {
   const list = store.get('history', []);
@@ -694,7 +695,6 @@ function addHistory(entry) {
 function renderHistory() {
   const list = store.get('history', []);
   $('#historySec').hidden = list.length === 0;
-  const fmtDate = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   $('#history').replaceChildren(...list.map((item) => {
     const isList = item.kind === 'playlist';
     const meta = isList

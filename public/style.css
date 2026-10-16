@@ -296,7 +296,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .check:checked { background: var(--accent); border-color: var(--accent); }
 .check:checked::after { opacity: 1; }
 .check:indeterminate { background: var(--accent); border-color: var(--accent); }
-.check:indeterminate::after { opacity: 1; width: 10px; height: 0; border-left: 0; transform: none; }
+.check:indeterminate::after { opacity: 1; height: 0; border-left: 0; transform: none; }
 .check:disabled { opacity: .4; cursor: default; }
 
 .pl-list {
@@ -458,7 +458,6 @@ legend { padding: 0; margin-bottom: 8px; font-size: 12px; font-weight: 650; colo
   .job-row { grid-template-columns: auto minmax(0, 1fr); }
   .job .thumb { width: 52px; }
   .job-actions { grid-column: 1 / -1; justify-content: flex-end; }
-  .job-actions:empty { display: none; }
   .batch .job-row { grid-template-columns: auto minmax(0, 1fr) auto; }
   .batch .job-actions { grid-column: auto; }
   .pl-list li label { grid-template-columns: auto 56px minmax(0, 1fr); }

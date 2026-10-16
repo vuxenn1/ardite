@@ -39,7 +39,7 @@ async function download(url, dest, label) {
     const now = Date.now();
     if (now - last > 300) {
       last = now;
-      const pct = total ? ` (%${Math.floor((done / total) * 100)})` : '';
+      const pct = total ? ` (${Math.floor((done / total) * 100)}%)` : '';
       process.stdout.write(`\r  ${label}: ${mb(done)} MB${total ? ' / ' + mb(total) + ' MB' : ''}${pct}   `);
     }
   });

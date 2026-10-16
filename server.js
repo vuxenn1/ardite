@@ -1,4 +1,4 @@
-// Ardite — a self-hosted video downloader for your home network.
+// Ardite: a self-hosted video downloader for your home network.
 // Downloads with yt-dlp into a temp folder, then streams the file to whichever
 // device made the request (the PC itself or a phone on the same Wi-Fi).
 import http from 'node:http';
@@ -7,6 +7,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
+import { pipeline } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { createZip, fileCrc32 } from './zip.js';
 
@@ -27,7 +28,7 @@ const config = {
   maxConcurrent: 2,
   keepFilesMinutes: 30,
   maxPlaylistItems: 500,
-  cookiesFromBrowser: '', // e.g. "firefox" — for sites that require login
+  cookiesFromBrowser: '', // e.g. "firefox", for sites that require login
   ...readJson(path.join(DATA, 'config.json')),
 };
 if (process.env.PORT) config.port = Number(process.env.PORT);
@@ -138,10 +139,8 @@ function fetchInfo(url, playlist) {
     const timer = setTimeout(() => killTree(proc), 120000);
     proc.stdout.on('data', (d) => (out += d));
     proc.stderr.on('data', (d) => (err += d));
-    proc.on('error', (e) => {
-      clearTimeout(timer);
-      reject(friendlyError(e.message));
-    });
+    // 'close' also fires after a spawn error, so it handles both cases
+    proc.on('error', (e) => (err += e.message));
     proc.on('close', (code) => {
       clearTimeout(timer);
       if (code !== 0) return reject(friendlyError(lastError(err)));
@@ -163,23 +162,16 @@ function bestThumb(thumbs) {
 
 function summarizeVideo(info) {
   const heights = new Set();
-  let hasAudio = false;
   let hasVideo = false;
   for (const f of info.formats || []) {
-    const v = f.vcodec && f.vcodec !== 'none';
-    const a = f.acodec && f.acodec !== 'none';
-    if (v || (!f.vcodec && f.height)) {
+    if ((f.vcodec && f.vcodec !== 'none') || (!f.vcodec && f.height)) {
       hasVideo = true;
       // "res" in yt-dlp is the smaller side, so vertical 1080x1920 counts as 1080p
       const h = Math.min(f.height || 0, f.width || f.height || 0) || f.height;
       if (h) heights.add(h);
     }
-    if (a) hasAudio = true;
   }
-  if (!info.formats?.length) {
-    hasVideo = !!(info.height || info.vcodec !== 'none');
-    hasAudio = true;
-  }
+  if (!info.formats?.length) hasVideo = !!(info.height || info.vcodec !== 'none');
   return {
     type: 'video',
     title: info.title || info.id,
@@ -189,7 +181,6 @@ function summarizeVideo(info) {
     site: info.extractor_key || info.extractor || null,
     heights: [...heights].filter((h) => h >= 144).sort((a, b) => b - a),
     hasVideo,
-    hasAudio,
   };
 }
 
@@ -266,6 +257,11 @@ async function getInfo(url) {
     return summary;
   }
   if (video) return summarizeVideo(video.info);
+  if (list.status === 'fulfilled') {
+    // Only looked like a playlist (e.g. a "list" query parameter on a single video)
+    cacheInfo(url, list.value.json);
+    return summarizeVideo(list.value.info);
+  }
   throw list.reason;
 }
 
@@ -405,7 +401,7 @@ function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
     if (job.status === 'canceled') return finish(job);
 
     if (code !== 0 && source.infoFile) {
-      // The cached info may be stale (e.g. expired stream URLs) — retry from the link
+      // The cached info may be stale (e.g. expired stream URLs), so retry from the link
       log(`[${job.id}] cached info failed, retrying from link`);
       infoCache.delete(job.url);
       fs.rmSync(job.dir, { recursive: true, force: true });
@@ -452,11 +448,8 @@ function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
     finish(job);
   });
 
-  proc.on('error', (e) => {
-    job.status = 'error';
-    job.error = friendlyError(e.message);
-    finish(job);
-  });
+  // 'close' also fires after a spawn error, so the job is finished only there
+  proc.on('error', (e) => (stderr += e.message));
 }
 
 function finish(job) {
@@ -614,11 +607,11 @@ function createBatch(body) {
     const prefix = String(Number(e.index) || i + 1).padStart(width, '0');
     batch.jobs.push(createJob(e.url, opts, { title: e.title, prefix, batch }));
   }
-  log(`[batch ${id}] new playlist: ${entries.length} items, ${opts.mode} — ${batch.title}`);
+  log(`[batch ${id}] new playlist: ${entries.length} items, ${opts.mode}: ${batch.title}`);
   return batch;
 }
 
-async function serveZip(req, res, batch) {
+async function serveZip(res, batch) {
   const done = batch.jobs.filter((j) => j.status === 'done' && j.file && fs.existsSync(j.file));
   if (!done.length) return sendJson(res, 404, { message: 'Nothing finished yet.' });
   const entries = [];
@@ -634,8 +627,8 @@ async function serveZip(req, res, batch) {
     'Content-Length': length,
     'Cache-Control': 'no-store',
   });
-  stream.pipe(res);
-  res.on('close', () => stream.destroy());
+  // pipeline() closes the files if the client aborts or a read fails
+  pipeline(stream, res, () => {});
 }
 
 // ---------- yt-dlp self-update ----------
@@ -678,6 +671,7 @@ function sendJson(res, status, data) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = '';
+    req.setEncoding('utf8'); // keeps multi-byte characters intact across chunks
     req.on('data', (c) => {
       data += c;
       if (data.length > 2 * 1024 * 1024) {
@@ -722,10 +716,10 @@ function serveFile(req, res, job) {
     }
     end = Math.min(end, size - 1);
     res.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 });
-    return fs.createReadStream(job.file, { start, end }).pipe(res);
+    return pipeline(fs.createReadStream(job.file, { start, end }), res, () => {});
   }
   res.writeHead(200, { ...headers, 'Content-Length': size });
-  fs.createReadStream(job.file).pipe(res);
+  pipeline(fs.createReadStream(job.file), res, () => {});
 }
 
 function serveStatic(req, res, pathname) {
@@ -838,7 +832,7 @@ const server = http.createServer(async (req, res) => {
         const snap = publicBatch(batch);
         return openEvents(req, res, batch, snap, snap.finished);
       }
-      if (sub === 'zip' && req.method === 'GET') return serveZip(req, res, batch);
+      if (sub === 'zip' && req.method === 'GET') return serveZip(res, batch);
     }
 
     if (req.method === 'GET') return serveStatic(req, res, pathname);
@@ -863,14 +857,14 @@ fs.mkdirSync(WORK, { recursive: true });
 
 server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {
-    log(`Port ${config.port} is in use — Ardite is probably already running.`);
+    log(`Port ${config.port} is in use. Ardite is probably already running.`);
     process.exit(0);
   }
   throw e;
 });
 
 server.listen(config.port, config.host, () => {
-  log(`Ardite is running → http://localhost:${config.port}`);
+  log(`Ardite is running at http://localhost:${config.port}`);
   for (const ip of lanAddresses()) log(`  On your phone: http://${ip}:${config.port}`);
   readVersion();
   setTimeout(updateYtdlp, 5000);

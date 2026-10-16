@@ -1,4 +1,4 @@
-// Minimal streaming ZIP writer (store only — videos don't compress further).
+// Minimal streaming ZIP writer (store only, since videos don't compress further).
 // Sizes and CRCs are computed up front so the exact Content-Length is known
 // and no data descriptors are needed. Supports ZIP64 for >4 GB archives.
 import fs from 'node:fs';
@@ -89,8 +89,8 @@ export function createZip(entries) {
 
   const cdBuf = Buffer.concat(central);
   const cdOffset = offset;
-  const needZip64 = cdOffset >= MAX32 || cdBuf.length >= MAX32 || entries.length >= 0xffff
-    || entries.some((e) => e.size >= MAX32);
+  // A file over 4 GB also pushes cdOffset over the limit
+  const needZip64 = cdOffset >= MAX32 || cdBuf.length >= MAX32 || entries.length >= 0xffff;
 
   const tail = [cdBuf];
   if (needZip64) {
