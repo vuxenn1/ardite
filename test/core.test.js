@@ -1,0 +1,190 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  isValidUrl, friendlyError, lastError, shortSide, summarizeVideo, summarizePlaylist, videoStats,
+  linkKind, expectedHeight, codecName, parseOptions, parseTrim, fileClock, isNewer, contentDisposition,
+} from '../core.js';
+
+test('isValidUrl accepts only http and https links', () => {
+  assert.equal(isValidUrl('https://www.youtube.com/watch?v=abc'), true);
+  assert.equal(isValidUrl('http://example.com'), true);
+  assert.equal(isValidUrl('ftp://example.com/file'), false);
+  assert.equal(isValidUrl('javascript:alert(1)'), false);
+  assert.equal(isValidUrl('not a link'), false);
+  assert.equal(isValidUrl(undefined), false);
+});
+
+test('friendlyError turns yt-dlp errors into codes', () => {
+  const cases = [
+    ['ERROR: Unsupported URL: https://example.com/', 'unsupported'],
+    ['ERROR: [youtube] x: Sign in to confirm you’re not a bot. Use --cookies-from-browser', 'signin'],
+    ["ERROR: [youtube] x: Sign in to confirm your age", 'signin'],
+    ['ERROR: [youtube] x: Private video. Sign in if you\'ve been granted access', 'private'],
+    ['ERROR: [instagram] x: login required', 'login'],
+    ['ERROR: [youtube] x: Requested format is not available', 'format'],
+    ['ERROR: [youtube] x: Video unavailable', 'notFound'],
+    ['ERROR: Unable to download webpage: <urlopen error [Errno 11001] getaddrinfo failed>', 'network'],
+    ['ERROR: [twitter] x: No video could be found in this tweet', 'noVideo'],
+  ];
+  for (const [raw, code] of cases) assert.equal(friendlyError(raw).code, code, raw);
+
+  const unknown = friendlyError('ERROR: something odd happened');
+  assert.equal(unknown.code, 'failed');
+  assert.equal(unknown.detail, 'something odd happened');
+  assert.equal(friendlyError('').detail, 'Unknown error');
+});
+
+test('lastError picks the last ERROR line, or the last line', () => {
+  assert.equal(lastError('WARNING: a\nERROR: first\nERROR: second\nmore'), 'ERROR: second');
+  assert.equal(lastError('just\nsome output\n'), 'some output');
+});
+
+test('shortSide uses the smaller side, so vertical videos count right', () => {
+  assert.equal(shortSide(1920, 1080), 1080);
+  assert.equal(shortSide(1080, 1920), 1080);
+  assert.equal(shortSide(null, 720), 720);
+  assert.equal(shortSide(null, null), 0);
+});
+
+const sampleInfo = {
+  id: 'abc',
+  title: 'Sample',
+  duration: 125,
+  extractor_key: 'Youtube',
+  formats: [
+    { vcodec: 'vp9', width: 3840, height: 2160, fps: 59.94 },
+    { vcodec: 'avc1.640028', width: 1920, height: 1080, fps: 30 },
+    { vcodec: 'avc1.4d401f', width: 1280, height: 720, fps: 60 },
+    { vcodec: 'none', acodec: 'mp4a.40.2' },
+    { vcodec: 'avc1', width: 256, height: 100 }, // below 144p, not offered
+  ],
+  subtitles: { tr: [{ name: 'Turkish', ext: 'vtt' }], live_chat: [{ ext: 'json' }] },
+  automatic_captions: { en: [{ name: 'English' }], 'en-orig': [{ name: 'English (Original)' }] },
+};
+
+test('summarizeVideo lists resolutions, frame rates and subtitles', () => {
+  const v = summarizeVideo(sampleInfo);
+  assert.deepEqual(v.heights, [2160, 1080, 720]);
+  assert.deepEqual(v.fps, { 2160: 60, 1080: 30, 720: 60 });
+  assert.equal(v.hasVideo, true);
+  assert.equal(v.duration, 125);
+  assert.deepEqual(v.subs.list, [{ code: 'tr', name: 'Turkish' }]);
+  assert.deepEqual(v.subs.auto, { code: 'en-orig', name: 'English (Original)' });
+});
+
+test('summarizeVideo knows audio-only posts', () => {
+  const v = summarizeVideo({ title: 'Song', formats: [{ vcodec: 'none', acodec: 'opus' }] });
+  assert.equal(v.hasVideo, false);
+  assert.deepEqual(v.heights, []);
+});
+
+test('videoStats finds the best resolution overall and in H.264', () => {
+  assert.deepEqual(videoStats(sampleInfo), { maxAll: 2160, maxH264: 1080 });
+});
+
+test('summarizePlaylist marks unavailable entries and respects the limit', () => {
+  const info = {
+    title: 'List',
+    entries: [
+      { id: 'a', title: 'One', url: 'https://www.youtube.com/watch?v=a', duration: 10 },
+      { id: 'b', title: '[Private video]', url: 'https://www.youtube.com/watch?v=b' },
+      { id: 'c', ie_key: 'Youtube', title: 'Three' }, // no url: built from the id
+      null,
+      { id: 'd', title: 'No link' }, // skipped
+    ],
+  };
+  const p = summarizePlaylist(info, 2);
+  assert.equal(p.count, 3);
+  assert.equal(p.entries.length, 2);
+  assert.equal(p.truncated, true);
+  assert.equal(p.entries[1].unavailable, true);
+  assert.equal(summarizePlaylist(info).entries[2].url, 'https://www.youtube.com/watch?v=c');
+});
+
+test('linkKind tells videos and playlists apart', () => {
+  assert.deepEqual(linkKind('https://www.youtube.com/watch?v=a&list=b'), { list: true, video: true });
+  assert.deepEqual(linkKind('https://www.youtube.com/playlist?list=b'), { list: true, video: false });
+  assert.deepEqual(linkKind('https://youtu.be/a'), { list: false, video: true });
+  assert.deepEqual(linkKind('https://www.youtube.com/shorts/a'), { list: false, video: true });
+  assert.deepEqual(linkKind('https://soundcloud.com/x/sets/y'), { list: true, video: false });
+});
+
+test('expectedHeight follows the chosen quality and format', () => {
+  const stats = { maxAll: 2160, maxH264: 1080 };
+  assert.equal(expectedHeight({ mode: 'video', quality: 'max', codec: 'best' }, stats), 2160);
+  assert.equal(expectedHeight({ mode: 'video', quality: 'max', codec: 'h264' }, stats), 1080);
+  assert.equal(expectedHeight({ mode: 'video', quality: '720', codec: 'best' }, stats), 720);
+  assert.equal(expectedHeight({ mode: 'video', quality: '2160', codec: 'h264' }, stats), 2160);
+  assert.equal(expectedHeight({ mode: 'video', quality: 'max', codec: 'h264' }, { maxAll: 720, maxH264: 0 }), 720);
+  assert.equal(expectedHeight({ mode: 'audio', quality: 'max', codec: 'best' }, stats), null);
+  assert.equal(expectedHeight({ mode: 'video', quality: 'max', codec: 'best' }, undefined), null);
+});
+
+test('codecName gives short, familiar names', () => {
+  assert.equal(codecName('av01.0.08M.08'), 'AV1');
+  assert.equal(codecName('av1'), 'AV1');
+  assert.equal(codecName('vp09.00.41.08'), 'VP9');
+  assert.equal(codecName('vp9'), 'VP9');
+  assert.equal(codecName('avc1.64002A'), 'H.264');
+  assert.equal(codecName('h264'), 'H.264');
+  assert.equal(codecName('hevc'), 'H.265');
+  assert.equal(codecName('prores'), 'PRORES');
+});
+
+test('parseOptions falls back to safe values', () => {
+  assert.deepEqual(parseOptions({}), {
+    mode: 'video', quality: 'max', codec: 'h264', audioFormat: 'mp3', trim: null, subs: null,
+  });
+  const o = parseOptions({ mode: 'video', quality: '1080', codec: 'best', subs: { langs: ['tr'], srt: true } });
+  assert.equal(o.quality, '1080');
+  assert.equal(o.codec, 'best');
+  assert.deepEqual(o.subs, { langs: ['tr'], auto: false, srt: true });
+  assert.equal(parseOptions({ quality: '1080; rm -rf', audioFormat: 'exe' }).quality, 'max');
+  assert.equal(parseOptions({ audioFormat: 'exe' }).audioFormat, 'mp3');
+  // no subtitles for audio
+  assert.equal(parseOptions({ mode: 'audio', subs: { langs: ['tr'] } }).subs, null);
+});
+
+test('parseTrim accepts sensible ranges only', () => {
+  assert.equal(parseTrim(null), null);
+  assert.equal(parseTrim(undefined), null);
+  assert.equal(parseTrim({ start: '', end: '' }), null); // whole video
+  assert.equal(parseTrim({ start: 0 }), null);
+  assert.deepEqual(parseTrim({ start: 83, end: 125 }), { start: 83, end: 125, precise: false });
+  assert.deepEqual(parseTrim({ start: 83.12345, end: null, precise: true }), { start: 83.123, end: null, precise: true });
+  assert.deepEqual(parseTrim({ start: 4000 }), { start: 4000, end: null, precise: false });
+  assert.equal(parseTrim({ start: 50, end: 10 }), undefined);
+  assert.equal(parseTrim({ start: 10, end: 10 }), undefined);
+  assert.equal(parseTrim({ start: -5 }), undefined);
+  assert.equal(parseTrim({ start: 'abc' }), undefined);
+  assert.equal(parseTrim({ start: 0, end: 49 * 3600 }), undefined);
+  assert.equal(parseTrim('83-125'), undefined);
+});
+
+test('fileClock writes times safe for Windows file names', () => {
+  assert.equal(fileClock(0), '0m00s');
+  assert.equal(fileClock(83), '1m23s');
+  assert.equal(fileClock(83.9), '1m23s');
+  assert.equal(fileClock(3725), '1h02m05s');
+});
+
+test('isNewer compares versions number by number', () => {
+  assert.equal(isNewer('1.10.0', '1.9.0'), true);
+  assert.equal(isNewer('2.0.0', '1.99.99'), true);
+  assert.equal(isNewer('1.4.0', '1.4.0'), false);
+  assert.equal(isNewer('1.3.9', '1.4.0'), false);
+});
+
+test('contentDisposition keeps the real name and a safe fallback', () => {
+  assert.equal(
+    contentDisposition('Metallica: Ride [x].mp4'),
+    "attachment; filename=\"Metallica: Ride [x].mp4\"; filename*=UTF-8''Metallica%3A%20Ride%20%5Bx%5D.mp4",
+  );
+  // non-ASCII letters drop from the fallback but stay in the UTF-8 name
+  const tr = contentDisposition('Şarkı "canlı".mp3');
+  assert.match(tr, /filename="Sark canl.mp3"/);
+  assert.match(tr, /filename\*=UTF-8''%C5%9Eark%C4%B1%20%22canl%C4%B1%22\.mp3$/);
+  // characters not allowed in filename* are encoded
+  assert.match(contentDisposition("Don't (live)*.mp4"), /filename\*=UTF-8''Don%27t%20%28live%29%2A\.mp4$/);
+  assert.match(contentDisposition('日本.mp4'), /filename="\.mp4"|filename="download"/);
+});

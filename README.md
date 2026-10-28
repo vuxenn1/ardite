@@ -97,7 +97,9 @@ Optional settings go in `data/config.json`, for example:
 
 Requires [Node.js](https://nodejs.org) 20.15 or newer. Download this repository (**Code > Download ZIP**), extract it and double-click `install.bat`.
 
-To publish a release, push a tag like `v1.5.0`. GitHub Actions builds `Ardite-win64.zip` with Node.js included and attaches it to the release.
+Run the tests with `node --test` (they also run on every push).
+
+To publish a release, push a tag like `v1.5.0`. GitHub Actions builds `Ardite-win64.zip` with Node.js included, runs the tests and a smoke test on Windows with the packaged app, and only then attaches it to the release.
 
 </details>
 

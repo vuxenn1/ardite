@@ -1,6 +1,8 @@
-# Builds a ready-to-use Windows package (Node.js included) and publishes it as a GitHub Release.
-# - Push a tag like v1.0.0  -> creates the release with Ardite-win64.zip
-# - Run it by hand (Actions tab > Release > Run workflow) -> test build, downloadable from the run page
+# Builds a ready-to-use Windows package (Node.js included), checks it on Windows and publishes it.
+# - Push a tag like v1.0.0  -> build, check, then create the release with Ardite-win64.zip
+# - Run it by hand (Actions tab > Release > Run workflow) -> build and check only; the package
+#   can be downloaded from the run page
+# Nothing is published unless the tests and the smoke test pass on the packaged app.
 name: Release
 
 on:
@@ -16,8 +18,16 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NODE_LINE: latest-v24.x # Node.js LTS line bundled into the package
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v5
+
+      - name: Work out the version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then version="${GITHUB_REF_NAME#v}"; else version="0.0.0-dev"; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Download portable Node.js
         run: |
@@ -31,19 +41,60 @@ jobs:
 
       - name: Build package
         run: |
-          if [[ "$GITHUB_REF_TYPE" == tag ]]; then version="${GITHUB_REF_NAME#v}"; else version="0.0.0-dev"; fi
           out=dist/Ardite
           mkdir -p "$out/runtime"
           cp -r public scripts ./*.js package.json LICENSE README.md ./*.bat "$out/"
           cp node-dist/*/node.exe "$out/runtime/"
-          sed -i -E "s/\"version\": \"[^\"]+\"/\"version\": \"$version\"/" "$out/package.json"
+          sed -i -E "s/\"version\": \"[^\"]+\"/\"version\": \"${{ steps.version.outputs.version }}\"/" "$out/package.json"
           (cd dist && zip -qr Ardite-win64.zip Ardite)
           ls -lh dist
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Ardite-win64
+          path: dist/Ardite-win64.zip
+          if-no-files-found: error
+
+  # Runs on Windows with the Node.js from the package, exactly like users get it
+  verify:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: Ardite-win64
+          path: dist
+
+      - name: Unpack
+        run: Expand-Archive dist/Ardite-win64.zip -DestinationPath pkg
+
+      - name: Tests
+        run: pkg/Ardite/runtime/node.exe --test
+
+      - name: Get yt-dlp (the server needs it to start)
+        run: |
+          New-Item -ItemType Directory -Force pkg/Ardite/bin | Out-Null
+          Invoke-WebRequest https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe -OutFile pkg/Ardite/bin/yt-dlp.exe
+
+      - name: Smoke test (start the packaged app and check it)
+        run: pkg/Ardite/runtime/node.exe .github/smoke.mjs pkg/Ardite ${{ needs.build.outputs.version }}
+
+  publish:
+    needs: [build, verify]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Ardite-win64
+          path: dist
+
       - name: Publish release
-        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           cat > notes.md <<'EOF'
           ## Installation
@@ -56,10 +107,3 @@ jobs:
           EOF
           gh release create "$GITHUB_REF_NAME" dist/Ardite-win64.zip \
             --title "Ardite $GITHUB_REF_NAME" --notes-file notes.md --generate-notes
-
-      - name: Upload test build
-        if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ardite-win64
-          path: dist/Ardite
