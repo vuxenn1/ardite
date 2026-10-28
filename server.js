@@ -33,6 +33,8 @@ const config = {
 };
 if (process.env.PORT) config.port = Number(process.env.PORT);
 const COOKIES_FILE = path.join(DATA, 'cookies.txt');
+const HISTORY_FILE = path.join(DATA, 'history.json');
+const HISTORY_MAX = 500;
 
 // ---------- logging ----------
 
@@ -455,11 +457,64 @@ function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
   proc.on('error', (e) => (stderr += e.message));
 }
 
+// ---------- download history ----------
+
+// Shared by all devices. Only small details are kept (title, link, site, device),
+// never the files themselves, which stay on whichever device downloaded them.
+let history = readJson(HISTORY_FILE);
+if (!Array.isArray(history)) history = [];
+
+function saveHistory() {
+  try {
+    const tmp = HISTORY_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(history));
+    fs.renameSync(tmp, HISTORY_FILE);
+  } catch (e) {
+    log('could not save history:', e.message);
+  }
+}
+
+function addHistory(entry) {
+  let site = null;
+  try {
+    site = new URL(entry.url).hostname.replace(/^(www|m|mobile|music)\./, '');
+    if (site === 'youtu.be') site = 'youtube.com';
+  } catch { /* keep null */ }
+  history.unshift({ id: crypto.randomBytes(4).toString('hex'), date: Date.now(), site, ...entry });
+  if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
+  saveHistory();
+}
+
+// A rough device type from the browser, shown next to each history entry
+function deviceOf(req) {
+  const ip = (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  if (ip === '127.0.0.1' || ip === '::1' || lanAddresses().includes(ip)) return 'pc';
+  const ua = req.headers['user-agent'] || '';
+  if (/iPhone/.test(ua)) return 'iphone';
+  if (/iPad/.test(ua)) return 'ipad';
+  if (/Android/.test(ua)) return 'android';
+  if (/Windows/.test(ua)) return 'windows';
+  if (/Macintosh/.test(ua)) return 'mac';
+  if (/Linux|CrOS/.test(ua)) return 'linux';
+  return 'other';
+}
+
 function finish(job) {
   running--;
   emit(job, true);
   for (const res of job.listeners) res.end();
   job.listeners.clear();
+  if (!job.batch && job.status === 'done') {
+    addHistory({
+      kind: 'video',
+      mode: job.opts.mode,
+      title: job.title,
+      url: job.url,
+      ext: path.extname(job.fileName).slice(1),
+      size: job.size,
+      device: job.device,
+    });
+  }
   if (job.batch) {
     // Playlist items are kept until the whole playlist is done, so the ZIP has everything
     if (job.batch.removed) removeJob(job);
@@ -516,6 +571,7 @@ function createJob(url, opts, extra = {}) {
     title: typeof extra.title === 'string' ? extra.title.slice(0, 300) : null,
     prefix: extra.prefix || null,
     batch: extra.batch || null,
+    device: extra.device || null,
     dir: path.join(WORK, id),
     listeners: new Set(),
     lastEmit: 0,
@@ -571,6 +627,18 @@ function checkBatchDone(batch) {
   if (!batch.jobs.every((j) => isFinal(j.status))) return;
   const s = publicBatch(batch);
   log(`[batch ${batch.id}] finished: ${s.done} ok, ${s.failed} failed, ${s.canceled} canceled`);
+  if (s.done && !batch.recorded) {
+    batch.recorded = true;
+    addHistory({
+      kind: 'playlist',
+      mode: batch.opts.mode,
+      title: batch.title,
+      url: isValidUrl(batch.url) ? batch.url : null,
+      count: s.done,
+      size: s.size,
+      device: batch.device,
+    });
+  }
   for (const res of batch.listeners) res.end();
   batch.listeners.clear();
   clearTimeout(batch.cleanup);
@@ -588,7 +656,7 @@ function removeBatch(batch) {
   batches.delete(batch.id);
 }
 
-function createBatch(body) {
+function createBatch(body, device) {
   const opts = parseOptions(body);
   const entries = (Array.isArray(body.entries) ? body.entries : [])
     .filter((e) => e && isValidUrl(e.url))
@@ -601,6 +669,7 @@ function createBatch(body) {
     url: body.url,
     title: String(body.title || 'Playlist').slice(0, 300),
     opts,
+    device,
     jobs: [],
     listeners: new Set(),
     lastEmit: 0,
@@ -772,6 +841,21 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    if (pathname === '/api/history') {
+      if (req.method === 'GET') return sendJson(res, 200, history);
+      if (req.method === 'DELETE') {
+        history = [];
+        saveHistory();
+        return sendJson(res, 200, { ok: true });
+      }
+    }
+    const hm = /^\/api\/history\/([a-f0-9]+)$/.exec(pathname);
+    if (hm && req.method === 'DELETE') {
+      history = history.filter((e) => e.id !== hm[1]);
+      saveHistory();
+      return sendJson(res, 200, { ok: true });
+    }
+
     if (pathname === '/api/info' && req.method === 'POST') {
       const body = await readBody(req);
       if (!isValidUrl(body.url)) return sendJson(res, 400, fail('invalidUrl', 'Enter a valid link.'));
@@ -785,13 +869,13 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/jobs' && req.method === 'POST') {
       const body = await readBody(req);
       if (!isValidUrl(body.url)) return sendJson(res, 400, fail('invalidUrl', 'Enter a valid link.'));
-      return sendJson(res, 201, publicJob(createJob(body.url, parseOptions(body), { title: body.title })));
+      return sendJson(res, 201, publicJob(createJob(body.url, parseOptions(body), { title: body.title, device: deviceOf(req) })));
     }
 
     if (pathname === '/api/batches' && req.method === 'POST') {
       const body = await readBody(req);
       try {
-        return sendJson(res, 201, publicBatch(createBatch(body)));
+        return sendJson(res, 201, publicBatch(createBatch(body, deviceOf(req))));
       } catch (e) {
         return sendJson(res, 400, fail(e.code, e.message));
       }

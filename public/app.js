@@ -523,11 +523,12 @@ function update(task, data) {
   if (!taskFinished(task) || wasFinished) return;
   task.es?.close();
 
+  // the server records finished downloads in the shared history
   if (task.kind === 'batch') {
-    addHistory({ kind: 'playlist', url: task.meta.url, mode: task.meta.mode, title: data.title, count: data.done, size: data.size });
+    loadHistory();
     toast(data.failed ? t('toast.playlistReadyFailed', data.failed) : t('toast.playlistReady'));
   } else if (data.status === 'done') {
-    addHistory({ kind: 'video', url: task.meta.url, mode: task.meta.mode, title: data.title || task.meta.title, size: data.size, ext: (data.fileName || '').split('.').pop() });
+    loadHistory();
     if (settings.autoSave && !task.saved) saveTask(task);
   } else if (data.status === 'error') {
     toast(errText(data.error, 'err.failed'));
@@ -694,47 +695,89 @@ async function restoreTasks() {
 const makeDateFormat = () => new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : lang, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 let fmtDate = makeDateFormat();
 
-function addHistory(entry) {
-  const list = store.get('history', []);
-  list.unshift({ ...entry, date: Date.now() });
-  store.set('history', list.slice(0, 40));
+// The history lives on the PC and is shared by all devices: only titles and links, no files.
+const HISTORY_PAGE = 30;
+let historyList = [];
+let historyShown = HISTORY_PAGE;
+
+async function loadHistory() {
+  try {
+    historyList = await api('/api/history');
+    renderHistory();
+  } catch { /* server may be down */ }
+}
+
+function historyAgain(item) {
+  setMode(item.mode);
+  if (item.kind === 'playlist') {
+    input.value = item.url;
+    updateInputButtons();
+    loadPreview(item.url);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } else {
+    startJob(item.url);
+  }
+}
+
+async function removeHistory(item) {
+  historyList = historyList.filter((e) => e.id !== item.id);
   renderHistory();
+  try {
+    await api(`/api/history/${item.id}`, { method: 'DELETE' });
+  } catch { loadHistory(); }
 }
 
 function renderHistory() {
-  const list = store.get('history', []);
-  $('#historySec').hidden = list.length === 0;
-  $('#history').replaceChildren(...list.map((item) => {
+  $('#historySec').hidden = historyList.length === 0;
+  const items = historyList.slice(0, historyShown).map((item) => {
     const isList = item.kind === 'playlist';
-    const meta = isList
-      ? [fmtDate.format(item.date), t('files', item.count || 0), fmtBytes(item.size)]
-      : [fmtDate.format(item.date), item.ext?.toUpperCase(), fmtBytes(item.size)];
+    const meta = [
+      fmtDate.format(item.date),
+      item.device && t('device.' + item.device),
+      item.site,
+      isList ? t('files', item.count || 0) : item.ext?.toUpperCase(),
+      fmtBytes(item.size),
+    ];
+    const title = item.title || item.url || t('untitled');
     return h('li', {},
       h('div', { class: 'h-icon' }, icon(isList ? 'list' : item.mode === 'audio' ? 'audio' : 'video')),
       h('div', { style: 'min-width:0' },
-        h('div', { class: 'h-title', title: item.title }, item.title),
+        item.url
+          ? h('a', { class: 'h-title', href: item.url, target: '_blank', rel: 'noopener noreferrer', title }, title)
+          : h('div', { class: 'h-title', title }, title),
         h('div', { class: 'h-meta' }, meta.filter(Boolean).join(' · '))),
-      h('button', {
-        type: 'button', class: 'h-again',
-        onclick: () => {
-          setMode(item.mode);
-          if (isList) {
-            input.value = item.url;
-            updateInputButtons();
-            loadPreview(item.url);
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-          } else {
-            startJob(item.url);
-          }
-        },
-      }, t('again')));
-  }));
+      h('div', { class: 'h-actions' },
+        item.url && h('button', { type: 'button', class: 'h-again', onclick: () => historyAgain(item) }, t('again')),
+        h('button', {
+          type: 'button', class: 'icon-btn ghost h-remove', title: t('remove'), 'aria-label': t('remove'),
+          onclick: () => removeHistory(item),
+        }, icon('close'))));
+  });
+  if (historyList.length > historyShown) {
+    items.push(h('li', { class: 'h-more' }, h('button', {
+      type: 'button', class: 'link-btn',
+      onclick: () => { historyShown += HISTORY_PAGE; renderHistory(); },
+    }, t('history.more', historyList.length - historyShown))));
+  }
+  $('#history').replaceChildren(...items);
 }
 
-$('#clearHistory').addEventListener('click', () => {
-  store.set('history', []);
+$('#clearHistory').addEventListener('click', async () => {
+  if (!confirm(t('history.confirmClear'))) return;
+  historyList = [];
   renderHistory();
+  try {
+    await api('/api/history', { method: 'DELETE' });
+  } catch { loadHistory(); }
 });
+
+// pick up downloads made on other devices when coming back to the tab
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') loadHistory();
+});
+
+// history used to be kept per browser; it now lives on the PC
+try { localStorage.removeItem('ardite.history'); } catch { /* ignore */ }
 
 // ---------- settings ----------
 
@@ -843,7 +886,7 @@ applyI18n();
 applyTheme();
 setMode(settings.mode === 'audio' ? 'audio' : 'video');
 updateInputButtons();
-renderHistory();
+loadHistory();
 restoreTasks();
 loadStatus();
 
