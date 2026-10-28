@@ -330,6 +330,9 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .job-status { margin-top: 2px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .job.done .job-status { color: var(--blue); }
 .job.error .job-status { color: var(--danger); white-space: normal; }
+/* downloaded, but in a lower quality than the site usually offers */
+.job.done.warn .job-status { color: var(--accent); white-space: normal; }
+.job.done.warn .bar > span { background: var(--accent); }
 
 .bar { margin-top: 10px; height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
 .bar > span { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent); transition: width .35s ease; }

@@ -168,19 +168,27 @@ function bestThumb(thumbs) {
   return thumbs.filter((t) => t.url).pop()?.url || null;
 }
 
+const isVideoFormat = (f) => (f.vcodec && f.vcodec !== 'none') || (!f.vcodec && f.height);
+// "res" in yt-dlp is the smaller side, so vertical 1080x1920 counts as 1080p
+const shortSide = (w, h) => Math.min(h || 0, w || h || 0) || h || 0;
+
 function summarizeVideo(info) {
   const heights = new Set();
+  const fps = {}; // highest frame rate per resolution, e.g. { 1080: 60 }
   let hasVideo = false;
   for (const f of info.formats || []) {
-    if ((f.vcodec && f.vcodec !== 'none') || (!f.vcodec && f.height)) {
+    if (isVideoFormat(f)) {
       hasVideo = true;
-      // "res" in yt-dlp is the smaller side, so vertical 1080x1920 counts as 1080p
-      const h = Math.min(f.height || 0, f.width || f.height || 0) || f.height;
-      if (h) heights.add(h);
+      const h = shortSide(f.width, f.height);
+      if (h) {
+        heights.add(h);
+        if (f.fps) fps[h] = Math.max(fps[h] || 0, Math.round(f.fps));
+      }
     }
   }
   if (!info.formats?.length) hasVideo = !!(info.height || info.vcodec !== 'none');
   return {
+    fps,
     type: 'video',
     title: info.title || info.id,
     uploader: info.uploader || info.channel || info.creator || null,
@@ -229,10 +237,23 @@ function summarizePlaylist(info) {
   };
 }
 
-function cacheInfo(url, json) {
+// Best resolution on offer, used to notice when a site hands out a lower quality than usual
+function videoStats(info) {
+  let maxAll = 0;
+  let maxH264 = 0;
+  for (const f of info.formats || []) {
+    if (!isVideoFormat(f)) continue;
+    const h = shortSide(f.width, f.height);
+    maxAll = Math.max(maxAll, h);
+    if (/^(avc|h264)/i.test(f.vcodec || '')) maxH264 = Math.max(maxH264, h);
+  }
+  return { maxAll, maxH264 };
+}
+
+function cacheInfo(url, json, info) {
   const file = path.join(WORK, 'info-' + crypto.createHash('sha1').update(url).digest('hex') + '.json');
   fs.writeFileSync(file, json);
-  infoCache.set(url, { file, time: Date.now() });
+  infoCache.set(url, { file, time: Date.now(), stats: videoStats(info) });
 }
 
 // Links like youtube.com/watch?v=X&list=Y are both a video and a playlist
@@ -248,7 +269,7 @@ async function getInfo(url) {
   if (!kind.list) {
     const res = await fetchInfo(url, false);
     if (res.info._type === 'playlist') return summarizePlaylist(res.info);
-    cacheInfo(url, res.json);
+    cacheInfo(url, res.json, res.info);
     return summarizeVideo(res.info);
   }
 
@@ -257,7 +278,7 @@ async function getInfo(url) {
     kind.video ? fetchInfo(url, false) : Promise.reject(null),
   ]);
   const video = single.status === 'fulfilled' && single.value.info._type !== 'playlist' ? single.value : null;
-  if (video) cacheInfo(url, video.json);
+  if (video) cacheInfo(url, video.json, video.info);
 
   if (list.status === 'fulfilled' && list.value.info._type === 'playlist') {
     const summary = summarizePlaylist(list.value.info);
@@ -267,7 +288,7 @@ async function getInfo(url) {
   if (video) return summarizeVideo(video.info);
   if (list.status === 'fulfilled') {
     // Only looked like a playlist (e.g. a "list" query parameter on a single video)
-    cacheInfo(url, list.value.json);
+    cacheInfo(url, list.value.json, list.value.info);
     return summarizeVideo(list.value.info);
   }
   throw list.reason;
@@ -294,7 +315,34 @@ function publicJob(job) {
     title: job.title,
     fileName: job.fileName,
     size: job.size,
+    media: job.media || null,
+    expected: job.expected || null,
     error: job.error,
+  };
+}
+
+// The resolution the chosen settings should give, if the preview told us what's on offer
+function expectedHeight(opts, stats) {
+  if (!stats || opts.mode === 'audio') return null;
+  const cap = opts.quality === 'max' ? Infinity : Number(opts.quality);
+  const best = opts.codec === 'h264' && opts.quality === 'max' ? stats.maxH264 || stats.maxAll : stats.maxAll;
+  const h = Math.min(cap, best);
+  return h > 0 && Number.isFinite(h) ? h : null;
+}
+
+const CODEC_NAMES = [[/^av01/i, 'AV1'], [/^vp0?9/i, 'VP9'], [/^(avc|h264)/i, 'H.264'], [/^(hev|hvc|h265)/i, 'H.265'], [/^vp0?8/i, 'VP8']];
+
+// Line printed by yt-dlp once the final file is in place: what was actually downloaded
+function parseDone(job, line) {
+  const [, width, height, fps, vcodec, , range] = line.split('|');
+  const num = (v) => (v && v !== 'NA' && v !== 'None' ? Number(v) : null);
+  if (!vcodec || vcodec === 'none' || vcodec === 'NA') return;
+  const h = shortSide(num(width), num(height));
+  job.media = {
+    height: h || null,
+    fps: num(fps) ? Math.round(num(fps)) : null,
+    codec: CODEC_NAMES.find(([re]) => re.test(vcodec))?.[1] || vcodec.split('.')[0].toUpperCase(),
+    hdr: range && range !== 'SDR' && range !== 'NA' && range !== 'None' ? range : null,
   };
 }
 
@@ -318,6 +366,9 @@ function buildArgs(job, source) {
     '--progress-delta', '0.4',
     '--progress-template',
     'download:ARDITE|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|%(info.vcodec)s|%(info.acodec)s',
+    // report what was really downloaded; --print would otherwise silence the log lines we read
+    '--no-quiet',
+    '--print', 'after_move:ARDITE_DONE|%(width)s|%(height)s|%(fps)s|%(vcodec)s|%(acodec)s|%(dynamic_range)s',
     '-o', path.join(job.dir, name),
   ];
 
@@ -326,14 +377,16 @@ function buildArgs(job, source) {
     if (o.audioFormat !== 'best') args.push('--audio-format', o.audioFormat);
     if (o.audioFormat !== 'wav') args.push('--embed-thumbnail');
   } else {
+    // Streams are never re-encoded, only put together into an MP4 (VP9 and Opus fit in MP4 too)
     const res = o.quality === 'max' ? '' : `res:${o.quality}`;
     if (o.codec === 'h264') {
-      // Prefer H.264 + AAC MP4, which plays everywhere (iPhone included).
+      // Prefer H.264 + AAC, which plays everywhere (iPhone included), usually up to 1080p.
       // An explicitly chosen quality wins over the codec (picking 4K gets 4K).
       args.push('-S', [res, 'vcodec:h264', 'acodec:aac'].filter(Boolean).join(','), '--merge-output-format', 'mp4');
     } else {
-      // Prefer AAC audio: Opus can't go into MP4, which would force MKV (bad on phones)
-      args.push('-S', [res, 'acodec:aac'].filter(Boolean).join(','), '--merge-output-format', 'mp4/mkv');
+      // Highest resolution, then highest frame rate. Among equal ones prefer VP9 in SDR:
+      // AV1 4K60 stutters on GPUs without AV1 decoding, and HDR looks washed out on normal screens.
+      args.push('-S', [res || 'res', 'fps', 'vcodec:vp9', 'acodec:aac'].join(','), '--merge-output-format', 'mp4');
     }
   }
 
@@ -383,6 +436,7 @@ function parseLog(job, line) {
 function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
   job.status = 'running';
   job.phase = 'starting';
+  job.media = null;
   emit(job, true);
   fs.mkdirSync(job.dir, { recursive: true });
 
@@ -398,6 +452,7 @@ function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
     buffer = lines.pop();
     for (const line of lines) {
       if (line.startsWith('ARDITE|')) parseProgress(job, line);
+      else if (line.startsWith('ARDITE_DONE|')) parseDone(job, line);
       else parseLog(job, line);
     }
   });
@@ -452,7 +507,12 @@ function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
     job.status = 'done';
     job.phase = 'ready';
     job.progress = { ...job.progress, percent: 100 };
-    log(`[${job.id}] done: ${job.fileName} (${(job.size / 1048576).toFixed(1)} MB)`);
+    const m = job.media;
+    const quality = m ? ` ${m.height}p${m.fps || ''} ${m.codec}${m.hdr ? ' ' + m.hdr : ''}` : '';
+    log(`[${job.id}] done: ${job.fileName} (${(job.size / 1048576).toFixed(1)} MB${quality})`);
+    if (m?.height && job.expected && m.height < job.expected) {
+      log(`[${job.id}] lower quality than offered: got ${m.height}p, expected ${job.expected}p`);
+    }
     finish(job);
   });
 
@@ -514,6 +574,7 @@ function finish(job) {
       title: job.title,
       url: job.url,
       ext: path.extname(job.fileName).slice(1),
+      media: job.media || null,
       size: job.size,
       device: job.device,
     });
@@ -575,6 +636,7 @@ function createJob(url, opts, extra = {}) {
     prefix: extra.prefix || null,
     batch: extra.batch || null,
     device: extra.device || null,
+    expected: expectedHeight(opts, infoCache.get(url)?.stats),
     dir: path.join(WORK, id),
     listeners: new Set(),
     lastEmit: 0,

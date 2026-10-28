@@ -20,16 +20,22 @@ const store = {
   },
 };
 
+const isTouch = matchMedia('(pointer: coarse)').matches;
+
 const settings = {
   mode: 'video',
   quality: 'max',
-  codec: 'h264',
+  // PCs get the best quality (4K, 60 fps); phones get H.264, which every phone can play
+  codec: isTouch ? 'h264' : 'best',
   audioFormat: 'mp3',
   autoSave: true,
   theme: 'auto',
   lang: 'auto',
   ...store.get('settings', {}),
 };
+// Older versions defaulted to H.264 everywhere, which caps YouTube at 1080p.
+// Move PCs to the best quality unless someone picked a format in Settings.
+if (!isTouch && !settings.codecChosen) settings.codec = 'best';
 const saveSettings = () => store.set('settings', settings);
 
 // ---------- small helpers ----------
@@ -102,13 +108,21 @@ function errText(e, fallback = 'err.generic') {
 
 const phaseText = (phase) => (phase && hasText('phase.' + phase) ? t('phase.' + phase) : phase);
 
-function qualityLabel(q) {
+// "1080p", "4K"; with a frame rate above 30 it becomes "1080p60", "4K60"
+function qualityLabel(q, fps) {
   if (q === 'max') return settings.codec === 'h264' ? t('q.auto') : t('q.best');
   const n = Number(q);
-  if (n >= 4320) return '8K';
-  if (n >= 2160) return '4K';
-  return n + 'p';
+  const label = n >= 4320 ? '8K' : n >= 2160 ? '4K' : n + 'p';
+  return fps > 30 ? label + fps : label;
 }
+
+// What a finished download really is, e.g. "4K60 · VP9" or "1080p · H.264 · HDR10"
+function mediaLabel(m) {
+  if (!m?.height) return '';
+  return [qualityLabel(String(m.height), m.fps), m.codec, m.hdr].filter(Boolean).join(' · ');
+}
+
+const isLowQuality = (d) => d.media?.height && d.expected && d.media.height < d.expected;
 
 function extractUrl(text) {
   const m = /https?:\/\/[^\s<>"']+/i.exec(text || '');
@@ -219,7 +233,7 @@ function videoRow(v) {
     h('div', { class: 'meta' },
       v.uploader && h('span', {}, v.uploader),
       v.site && h('span', { class: 'badge' }, v.site),
-      best && h('span', { class: 'badge' }, t('upTo', qualityLabel(String(best)))),
+      best && h('span', { class: 'badge' }, t('upTo', qualityLabel(String(best), v.fps?.[best]))),
       !v.hasVideo && h('span', { class: 'badge' }, t('audioOnly')))));
 }
 
@@ -415,11 +429,13 @@ function renderOpts() {
   }
 
   const d = preview?.data;
-  const heights = (d?.type === 'video' ? d.heights : d?.video && preview.scope === 'video' ? d.video.heights : null) || [];
+  const v = d?.type === 'video' ? d : d?.video && preview.scope === 'video' ? d.video : null;
+  const heights = v?.heights || [];
+  const fps = v?.fps || {};
   let list = ['max', '2160', '1440', '1080', '720', '480', '360'];
   if (heights.length) list = ['max', ...new Set(heights.filter((x) => x >= 240).map(String))].slice(0, 7);
   const selected = list.includes(String(settings.quality)) ? String(settings.quality) : 'max';
-  box.replaceChildren(...list.map((v) => chip(qualityLabel(v), v === selected, () => {
+  box.replaceChildren(...list.map((v) => chip(qualityLabel(v, fps[v]), v === selected, () => {
     settings.quality = v;
     saveSettings();
     renderOpts();
@@ -562,7 +578,10 @@ function render(task) {
 
 function jobStatusText(d) {
   if (d.status === 'queued') return t('st.queued');
-  if (d.status === 'done') return [t('st.ready'), fmtBytes(d.size)].filter(Boolean).join(' · ');
+  if (d.status === 'done' && isLowQuality(d)) {
+    return t('warn.lowQuality', qualityLabel(String(d.media.height), d.media.fps), qualityLabel(String(d.expected)));
+  }
+  if (d.status === 'done') return [t('st.ready'), mediaLabel(d.media), fmtBytes(d.size)].filter(Boolean).join(' · ');
   if (d.status === 'error') return errText(d.error, 'st.failed');
   if (d.status === 'canceled') return t('st.canceled');
   const p = d.progress || {};
@@ -602,12 +621,12 @@ function renderJob(task) {
       onclick: () => { task.saved = true; persistTasks(); },
     }, icon('save'), t('save')));
   }
-  if (d.status === 'error') {
+  if (d.status === 'error' || (d.status === 'done' && isLowQuality(d))) {
     actions.append(h('button', { type: 'button', class: 'secondary-btn', onclick: () => { removeTask(task); setMode(meta.mode); startJob(meta.url); } }, t('retry')));
   }
   actions.append(closeButton(task));
 
-  task.el.className = `card job ${d.status}`;
+  task.el.className = `card job ${d.status}${d.status === 'done' && isLowQuality(d) ? ' warn' : ''}`;
   task.el.replaceChildren(h('div', { class: 'job-row' },
     taskThumb(meta, meta.mode === 'audio' ? 'audio' : 'video'),
     h('div', {},
@@ -735,7 +754,7 @@ function renderHistory() {
       fmtDate.format(item.date),
       item.device && t('device.' + item.device),
       item.site,
-      isList ? t('files', item.count || 0) : item.ext?.toUpperCase(),
+      isList ? t('files', item.count || 0) : mediaLabel(item.media) || item.ext?.toUpperCase(),
       fmtBytes(item.size),
     ];
     const title = item.title || item.url || t('untitled');
@@ -794,7 +813,7 @@ function openSettings() {
 $('#settingsBtn').addEventListener('click', openSettings);
 
 settingsDlg.addEventListener('change', (e) => {
-  if (e.target.name === 'codec') settings.codec = e.target.value;
+  if (e.target.name === 'codec') { settings.codec = e.target.value; settings.codecChosen = true; }
   if (e.target.name === 'autoSave') settings.autoSave = e.target.checked;
   saveSettings();
   renderOpts();
@@ -844,7 +863,7 @@ for (const dlg of $$('dialog')) {
 // ---------- phone connection ----------
 
 const isLocalHost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
-const isTouch = matchMedia('(pointer: coarse)').matches;
+// isTouch is defined at the top (it also picks the default video format)
 
 function renderQr(url) {
   for (const el of $$('[data-lan]')) el.textContent = url;
