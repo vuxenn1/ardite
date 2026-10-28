@@ -9,3 +9,6 @@ node_modules/
 *.log
 Thumbs.db
 .DS_Store
+
+# Node.js bundled into release packages
+runtime/

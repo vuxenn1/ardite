@@ -1,8 +1,8 @@
 # Ardite management script - the .bat files call this.
-# Usage: ardite.ps1 <start|stop|restart|autostart-on|autostart-off|firewall|firewall-off|uninstall|status>
+# Usage: ardite.ps1 <start|stop|restart|open|autostart-on|autostart-off|firewall|firewall-off|uninstall|status>
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('start', 'stop', 'restart', 'autostart-on', 'autostart-off', 'firewall', 'firewall-off', 'uninstall', 'status')]
+  [ValidateSet('start', 'stop', 'restart', 'open', 'autostart-on', 'autostart-off', 'firewall', 'firewall-off', 'uninstall', 'status')]
   [string]$Action
 )
 
@@ -20,10 +20,36 @@ if (Test-Path $cfgFile) {
   } catch { }
 }
 
-function Get-ArditePid {
+# The Node.js bundled with release packages, or the one installed on the system
+$BundledNode = Join-Path $Root 'runtime\node.exe'
+$NodePaths = @($BundledNode, (Get-Command node -ErrorAction SilentlyContinue).Source) |
+  Where-Object { $_ -and (Test-Path $_) }
+
+# Process listening on the port (might be another program)
+function Get-ListenerPid {
   $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($c) { return $c.OwningProcess }
   return $null
+}
+
+function Test-ArditeResponds {
+  try {
+    $r = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/status" -TimeoutSec 3 -UseBasicParsing
+    return $r.name -eq 'Ardite'
+  } catch { return $false }
+}
+
+# Only returns a PID when the process on the port is really Ardite
+function Get-ArditePid {
+  $procId = Get-ListenerPid
+  if ($procId -and (Test-ArditeResponds)) { return $procId }
+  return $null
+}
+
+function Write-PortConflict($procId) {
+  $name = (Get-Process -Id $procId -ErrorAction SilentlyContinue).ProcessName
+  Write-Host "  Port $Port is used by another program ($name, PID $procId)." -ForegroundColor Red
+  Write-Host '  Close it, or set another port in data\config.json, e.g. { "port": 7879 }'
 }
 
 function Test-Admin {
@@ -33,6 +59,8 @@ function Test-Admin {
 
 function Start-Ardite {
   if (Get-ArditePid) { Write-Host "  Ardite is already running: http://localhost:$Port"; return }
+  $other = Get-ListenerPid
+  if ($other) { Write-PortConflict $other; return }
   Start-Process wscript.exe -ArgumentList "`"$Vbs`""
   for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Milliseconds 300
@@ -82,10 +110,9 @@ function Set-Firewall {
   $waitForUser = $false
 
   # Clicking "Cancel" on an earlier Windows firewall prompt creates a block rule for node.exe that overrides the allow rule
-  $node = (Get-Command node -ErrorAction SilentlyContinue).Source
-  if ($node) {
+  if ($NodePaths) {
     $blocks = Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue |
-      Where-Object { $_.Program -ieq $node } | Get-NetFirewallRule |
+      Where-Object { $NodePaths -contains $_.Program } | Get-NetFirewallRule |
       Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' -and $_.Enabled -eq 'True' }
     if ($blocks) {
       $waitForUser = $true
@@ -120,7 +147,10 @@ function Remove-Firewall {
 function Show-Status {
   $procId = Get-ArditePid
   Write-Host ''
-  if ($procId) { Write-Host '  Status    : RUNNING' -ForegroundColor Green } else { Write-Host '  Status    : stopped' -ForegroundColor Yellow }
+  $other = if (-not $procId) { Get-ListenerPid } else { $null }
+  if ($procId) { Write-Host '  Status    : RUNNING' -ForegroundColor Green }
+  elseif ($other) { Write-Host "  Status    : stopped (port $Port is used by another program, PID $other)" -ForegroundColor Red }
+  else { Write-Host '  Status    : stopped' -ForegroundColor Yellow }
   Write-Host ('  Autostart : ' + $(if (Test-Path $Lnk) { 'on' } else { 'off' }))
   $rule = Get-NetFirewallRule -DisplayName $RuleName -ErrorAction SilentlyContinue
   Write-Host ('  Firewall  : ' + $(if ($rule) { 'allowed' } else { 'no rule' }))
@@ -135,6 +165,7 @@ switch ($Action) {
   'start' { Start-Ardite }
   'stop' { Stop-Ardite }
   'restart' { Stop-Ardite; Start-Sleep -Milliseconds 500; Start-Ardite }
+  'open' { Start-Process "http://localhost:$Port" }
   'autostart-on' { Enable-Autostart }
   'autostart-off' { Disable-Autostart }
   'firewall' { Set-Firewall }
