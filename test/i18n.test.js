@@ -50,7 +50,7 @@ test('every text the page asks for exists', () => {
 
 test('every error code and phase the server sends has a text', () => {
   const codes = new Set();
-  for (const f of ['core.js', 'server.js']) {
+  for (const f of ['core.js', 'server.js', 'updater.js']) {
     const src = fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
     for (const m of src.matchAll(/\[\/.*?\/i?, '(\w+)', '/g)) codes.add(`err.${m[1]}`); // friendlyError rules
     for (const m of src.matchAll(/fail\('(\w+)'/g)) codes.add(`err.${m[1]}`);
@@ -67,7 +67,7 @@ test('every error code and phase the server sends has a text', () => {
     codes.add(`device.${m[1]}`);
   }
   // make sure the search itself works, so this test can't pass by finding nothing
-  for (const k of ['err.signin', 'err.badTrim', 'phase.merging', 'phase.starting', 'phase.downloading-video', 'phase.queued', 'device.pc']) {
+  for (const k of ['err.signin', 'err.badTrim', 'err.updateBusy', 'phase.merging', 'phase.starting', 'phase.downloading-video', 'phase.queued', 'device.pc']) {
     assert.ok(codes.has(k), `found ${k}`);
   }
   const missing = [...codes].filter((k) => !(k in STRINGS.en));

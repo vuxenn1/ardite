@@ -48,7 +48,9 @@ This downloads yt-dlp and ffmpeg, makes Ardite start in the background with Wind
 
 ### Updating
 
-Ardite tells you when a new version is out. To update, run `stop.bat`, extract the new release over the old folder and run `install.bat` again. Your settings and history in the `data` folder are kept.
+Ardite tells you when a new version is out. Press **Update now**: it downloads the new version, checks it, restarts and the page refreshes by itself. Your settings, history and tools are kept. If the new version doesn't start, the previous one is put back automatically (details in `data\update\update.log`).
+
+Updating by hand works too: run `stop.bat`, extract the new release over the old folder and run `install.bat` again.
 
 ## Usage
 

@@ -16,6 +16,7 @@ import {
   contentDisposition,
 } from './core.js';
 import { subtitleArgs, findSubFiles, shiftSrt, embedSubs } from './subs.js';
+import { createUpdater, readRelease } from './updater.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -25,7 +26,6 @@ const EXE = process.platform === 'win32' ? '.exe' : '';
 const YTDLP = path.join(BIN, 'yt-dlp' + EXE);
 const FFPROBE = path.join(BIN, 'ffprobe' + EXE);
 const FFMPEG = path.join(BIN, 'ffmpeg' + EXE);
-const WORK = path.join(os.tmpdir(), 'ardite-jobs');
 const LOG_FILE = path.join(DATA, 'ardite.log');
 
 fs.mkdirSync(DATA, { recursive: true });
@@ -42,6 +42,8 @@ const config = {
   ...readJson(path.join(DATA, 'config.json')),
 };
 if (process.env.PORT) config.port = Number(process.env.PORT);
+// Temp folder for downloads. It's emptied at start, so each port (each Ardite) gets its own.
+const WORK = path.join(os.tmpdir(), `ardite-jobs-${config.port}`);
 const COOKIES_FILE = path.join(DATA, 'cookies.txt');
 const HISTORY_FILE = path.join(DATA, 'history.json');
 const HISTORY_MAX = 500;
@@ -741,25 +743,39 @@ async function serveZip(res, batch) {
 
 // Release packages get their version from the git tag; running from source shows "0.0.0-dev"
 const VERSION = readJson(path.join(ROOT, 'package.json')).version || '0.0.0-dev';
-let latestRelease = null; // { version, url }
+// GitHub's "latest release"; updateFeed can point elsewhere (used to test updates)
+const UPDATE_FEED = config.updateFeed || `https://api.github.com/repos/${config.repo}/releases/latest`;
+let latestRelease = null; // { version, url, asset }
 
-// Only asks GitHub which release is the latest; nothing is downloaded or installed automatically
+// Only asks which release is the latest; installing happens when someone presses "Update now"
 async function checkForUpdate() {
   if (!config.updateCheck || !/^\d+\.\d+\.\d+$/.test(VERSION)) return;
   try {
-    const res = await fetch(`https://api.github.com/repos/${config.repo}/releases/latest`, {
+    const res = await fetch(UPDATE_FEED, {
       headers: { 'User-Agent': 'Ardite', Accept: 'application/vnd.github+json' },
       signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) return;
-    const r = await res.json();
-    const version = String(r.tag_name || '').replace(/^v/, '');
-    const url = String(r.html_url || '');
-    if (!/^\d+\.\d+\.\d+$/.test(version) || !url.startsWith('https://github.com/')) return;
-    if (isNewer(version, VERSION) && latestRelease?.version !== version) log(`New Ardite version available: v${version}`);
-    latestRelease = { version, url };
+    const release = readRelease(await res.json());
+    if (!release) return;
+    if (isNewer(release.version, VERSION) && latestRelease?.version !== release.version) {
+      log(`New Ardite version available: v${release.version}`);
+    }
+    latestRelease = release;
   } catch { /* offline, try again later */ }
 }
+
+const updater = createUpdater({
+  root: ROOT,
+  data: DATA,
+  version: VERSION,
+  port: config.port,
+  feedUrl: UPDATE_FEED,
+  log,
+  // never restart in the middle of someone's download
+  isBusy: () => running > 0 || queue.some((j) => j.status === 'queued'),
+  shutdown: () => shutdown(),
+});
 
 // ---------- yt-dlp self-update ----------
 
@@ -889,13 +905,28 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         name: 'Ardite',
         version: VERSION,
-        update: latestRelease && isNewer(latestRelease.version, VERSION) ? latestRelease : null,
+        update: latestRelease && isNewer(latestRelease.version, VERSION)
+          ? { version: latestRelease.version, url: latestRelease.url, canInstall: !!latestRelease.asset && updater.supported() }
+          : null,
         ytdlp: ytdlpVersion,
         port: config.port,
         repo: `https://github.com/${config.repo}`,
         lan: lanAddresses().map((ip) => `http://${ip}:${config.port}`),
         cookies: fs.existsSync(COOKIES_FILE) ? 'file' : config.cookiesFromBrowser || null,
       });
+    }
+
+    if (pathname === '/api/update') {
+      if (req.method === 'GET') return sendJson(res, 200, updater.status());
+      if (req.method === 'POST') {
+        try {
+          const release = await updater.start();
+          log(`update to v${release.version} started`);
+          return sendJson(res, 202, updater.status());
+        } catch (e) {
+          return sendJson(res, 409, fail(e.code || 'updateFailed', e.message));
+        }
+      }
     }
 
     if (pathname === '/api/history') {

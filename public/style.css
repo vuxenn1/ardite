@@ -436,6 +436,15 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .update-bar span { flex: 1; min-width: 0; }
 .update-bar a { color: var(--blue); font-weight: 600; text-decoration: none; }
 .update-bar a:hover { text-decoration: underline; }
+.update-bar .update-go { height: 34px; padding: 0 14px; font-size: 13px; }
+.update-bar .link-btn.update-go { color: var(--blue); font-weight: 600; }
+/* spinner while an update downloads, installs and restarts */
+.update-bar.busy span { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
+.update-bar.busy span::before {
+  content: ""; flex: none; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--blue); border-right-color: transparent; animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------- history ---------- */
 .history { margin-top: 36px; }

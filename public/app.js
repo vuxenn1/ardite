@@ -1287,8 +1287,24 @@ function renderFoot() {
 }
 
 // "New version available" bar; closing it hides it until the next version comes out
+// While an update runs: { version, from, text, error?, done? }
+let updating = null;
+
 function renderUpdate() {
   const bar = $('#updateBar');
+  if (updating) {
+    bar.hidden = false;
+    bar.classList.toggle('busy', !updating.error && !updating.done);
+    bar.replaceChildren(...[
+      h('span', {}, updating.text),
+      updating.error && h('button', { type: 'button', class: 'link-btn update-go', onclick: installUpdate }, t('update.retry')),
+      updating.error && h('button', {
+        type: 'button', class: 'icon-btn ghost', title: t('close'), 'aria-label': t('close'),
+        onclick: () => { updating = null; renderUpdate(); },
+      }, icon('close'))].filter(Boolean));
+    return;
+  }
+  bar.classList.remove('busy');
   const u = serverStatus?.update;
   if (!u || store.get('dismissedUpdate') === u.version) {
     bar.hidden = true;
@@ -1297,11 +1313,72 @@ function renderUpdate() {
   bar.hidden = false;
   bar.replaceChildren(
     h('span', {}, t('update.text', u.version)),
-    h('a', { href: u.url, target: '_blank', rel: 'noopener noreferrer' }, t('update.link')),
+    u.canInstall ? h('button', { type: 'button', class: 'primary-btn update-go', onclick: installUpdate }, t('update.install')) : '',
+    h('a', { href: u.url, target: '_blank', rel: 'noopener noreferrer' }, u.canInstall ? t('update.whatsNew') : t('update.link')),
     h('button', {
       type: 'button', class: 'icon-btn ghost', title: t('close'), 'aria-label': t('close'),
       onclick: () => { store.set('dismissedUpdate', u.version); renderUpdate(); },
     }, icon('close')));
+}
+
+// One-click update: the server downloads and checks the package, then restarts itself with
+// the new version. This page follows along and reloads once the new version answers.
+async function installUpdate() {
+  const u = serverStatus?.update;
+  if (!u || !confirm(t('update.confirm', u.version))) return;
+  const from = serverStatus.version;
+  updating = { version: u.version, from, text: t('update.downloading', 0) };
+  renderUpdate();
+  try {
+    await api('/api/update', { method: 'POST' });
+  } catch (e) {
+    updating = { ...updating, error: true, text: errText(e, 'err.updateFailed') };
+    return renderUpdate();
+  }
+
+  const started = Date.now();
+  let serverWentAway = false;
+  const step = async () => {
+    if (!updating || updating.error) return;
+    if (!serverWentAway) {
+      try {
+        const s = await api('/api/update');
+        if (s.state === 'downloading') updating.text = t('update.downloading', s.percent ?? 0);
+        else if (s.state === 'installing') updating.text = t('update.installing');
+        else if (s.state === 'restarting') updating.text = t('update.restarting');
+        else if (s.state === 'error') {
+          updating = { ...updating, error: true, text: errText({ code: s.code }, 'err.updateFailed') };
+          return renderUpdate();
+        }
+      } catch {
+        // the old server has stopped; from now on wait for Ardite to answer again
+        serverWentAway = true;
+        updating.text = t('update.restarting');
+      }
+    } else {
+      try {
+        const s = await api('/api/status');
+        if (s.version === updating.version) {
+          updating = { ...updating, done: true, text: t('update.done', updating.version) };
+          renderUpdate();
+          setTimeout(() => location.reload(), 1500);
+          return;
+        }
+        // the old version came back: the updater put the backup back
+        if (s.version === updating.from && Date.now() - started > 15000) {
+          updating = { ...updating, error: true, text: t('update.rolledBack') };
+          return renderUpdate();
+        }
+      } catch { /* still restarting */ }
+    }
+    if (Date.now() - started > 4 * 60 * 1000) {
+      updating = { ...updating, error: true, text: t('update.slow') };
+      return renderUpdate();
+    }
+    renderUpdate();
+    setTimeout(step, 1000);
+  };
+  step();
 }
 
 async function loadStatus() {
