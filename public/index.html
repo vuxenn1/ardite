@@ -22,15 +22,15 @@
 <body>
   <div class="layout">
     <header class="top">
-      <a class="brand" href="/" aria-label="Ardite home">
+      <a class="brand" href="/" data-i18n-attr="aria-label:home">
         <img src="/icon.svg" alt="" width="30" height="30">
         <span>ardite</span>
       </a>
       <div class="top-actions">
-        <button id="phoneBtn" class="icon-btn" type="button" title="Open on your phone" aria-label="Open on your phone" hidden>
+        <button id="phoneBtn" class="icon-btn" type="button" data-i18n-attr="title:phone.btn,aria-label:phone.btn" hidden>
           <svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M10.5 18h3"/></svg>
         </button>
-        <button id="settingsBtn" class="icon-btn" type="button" title="Settings" aria-label="Settings">
+        <button id="settingsBtn" class="icon-btn" type="button" data-i18n-attr="title:settings,aria-label:settings">
           <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
         </button>
       </div>
@@ -38,35 +38,35 @@
 
     <main class="main">
       <section class="hero">
-        <h1>Paste a link.<br><span class="accent">Get the video.</span></h1>
-        <p class="sub">YouTube, Instagram, TikTok, X, Reddit, Twitch and 1,000+ other sites. Playlists too.</p>
+        <h1><span data-i18n="hero.line1"></span><br><span class="accent" data-i18n="hero.line2"></span></h1>
+        <p class="sub" data-i18n="hero.sub"></p>
 
         <form id="form" class="omnibox" autocomplete="off" novalidate>
           <svg class="omni-icon" viewBox="0 0 24 24"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3.2-3.2a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3.2 3.2a4.5 4.5 0 0 0 6.4 6.4l1-1"/></svg>
           <input id="url" type="url" inputmode="url" enterkeyhint="go" spellcheck="false" autocapitalize="off"
-                 placeholder="Paste a video or playlist link" aria-label="Video link">
-          <button id="clearBtn" class="icon-btn ghost" type="button" aria-label="Clear" hidden>
+                 data-i18n-attr="placeholder:input.placeholder,aria-label:input.label">
+          <button id="clearBtn" class="icon-btn ghost" type="button" data-i18n-attr="aria-label:clear" hidden>
             <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
           </button>
           <button id="pasteBtn" class="paste-btn" type="button" hidden>
             <svg viewBox="0 0 24 24"><rect x="7" y="4" width="10" height="4" rx="1.5"/><path d="M9 6H7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2"/></svg>
-            <span>Paste</span>
+            <span data-i18n="paste"></span>
           </button>
-          <button id="goBtn" class="go-btn" type="submit" aria-label="Download">
+          <button id="goBtn" class="go-btn" type="submit" data-i18n-attr="aria-label:download">
             <svg viewBox="0 0 24 24"><path d="M12 4v12M6.5 10.5 12 16l5.5-5.5M5 20h14"/></svg>
           </button>
         </form>
 
         <div class="controls">
-          <div class="segmented" role="tablist" aria-label="Download type">
+          <div class="segmented" role="tablist" data-i18n-attr="aria-label:mode.label">
             <button type="button" role="tab" data-mode="video">
-              <svg viewBox="0 0 24 24"><rect x="3" y="5" width="13" height="14" rx="2.5"/><path d="M16 10l5-3v10l-5-3"/></svg>Video
+              <svg viewBox="0 0 24 24"><rect x="3" y="5" width="13" height="14" rx="2.5"/><path d="M16 10l5-3v10l-5-3"/></svg><span data-i18n="mode.video"></span>
             </button>
             <button type="button" role="tab" data-mode="audio">
-              <svg viewBox="0 0 24 24"><path d="M9 18V6l11-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>Audio only
+              <svg viewBox="0 0 24 24"><path d="M9 18V6l11-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg><span data-i18n="mode.audio"></span>
             </button>
           </div>
-          <div id="opts" class="chips" aria-label="Options"></div>
+          <div id="opts" class="chips" data-i18n-attr="aria-label:opts.label"></div>
           <p id="optsHint" class="hint" hidden></p>
         </div>
       </section>
@@ -77,57 +77,65 @@
 
       <section id="historySec" class="history" hidden>
         <div class="sec-head">
-          <h2>Recent downloads</h2>
-          <button id="clearHistory" class="link-btn" type="button">Clear</button>
+          <h2 data-i18n="history.title"></h2>
+          <button id="clearHistory" class="link-btn" type="button" data-i18n="clear"></button>
         </div>
         <ul id="history"></ul>
       </section>
     </main>
 
     <aside id="phoneCard" class="card phone-card" hidden>
-      <h2>Use it on your phone</h2>
-      <p>Connect your phone to the <b>same Wi-Fi</b> and scan this code.</p>
+      <h2 data-i18n="phone.title"></h2>
+      <p data-i18n-html="phone.card"></p>
       <div class="qr" data-qr></div>
       <code class="lan-url" data-lan></code>
-      <p class="tiny">Tip: on your phone, tap "Add to Home Screen" and it opens like an app.</p>
+      <p class="tiny" data-i18n="phone.tip"></p>
     </aside>
 
     <footer class="foot">
-      <span id="footInfo">Running on your home PC</span>
+      <span id="footInfo" data-i18n="foot"></span>
     </footer>
   </div>
 
   <dialog id="settingsDlg" class="sheet">
     <form method="dialog" class="sheet-inner">
       <div class="sheet-head">
-        <h2>Settings</h2>
-        <button class="icon-btn ghost" value="close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        <h2 data-i18n="settings"></h2>
+        <button class="icon-btn ghost" value="close" data-i18n-attr="aria-label:close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       </div>
 
       <fieldset>
-        <legend>Video format</legend>
+        <legend data-i18n="set.format"></legend>
         <label class="radio-card">
           <input type="radio" name="codec" value="h264">
-          <span><b>Compatible (MP4 · H.264)</b><small>Plays on every device and app, iPhone included. Usually up to 1080p on YouTube.</small></span>
+          <span><b data-i18n="set.h264"></b><small data-i18n="set.h264.desc"></small></span>
         </label>
         <label class="radio-card">
           <input type="radio" name="codec" value="best">
-          <span><b>Highest quality (VP9 / AV1)</b><small>For 4K and 8K. May not play on some older phones or in video editors.</small></span>
+          <span><b data-i18n="set.best"></b><small data-i18n="set.best.desc"></small></span>
         </label>
       </fieldset>
 
       <fieldset>
-        <legend>General</legend>
+        <legend data-i18n="set.general"></legend>
         <label class="switch-row">
-          <span><b>Save automatically</b><small>Save the file as soon as it's ready. Playlists always wait for you.</small></span>
+          <span><b data-i18n="set.autoSave"></b><small data-i18n="set.autoSave.desc"></small></span>
           <input type="checkbox" name="autoSave" class="switch">
         </label>
         <div class="row">
-          <span><b>Theme</b></span>
+          <span><b data-i18n="set.theme"></b></span>
           <div class="mini-seg">
-            <button type="button" data-theme-val="auto">Auto</button>
-            <button type="button" data-theme-val="light">Light</button>
-            <button type="button" data-theme-val="dark">Dark</button>
+            <button type="button" data-theme-val="auto" data-i18n="auto"></button>
+            <button type="button" data-theme-val="light" data-i18n="theme.light"></button>
+            <button type="button" data-theme-val="dark" data-i18n="theme.dark"></button>
+          </div>
+        </div>
+        <div class="row">
+          <span><b data-i18n="set.lang"></b></span>
+          <div class="mini-seg">
+            <button type="button" data-lang-val="auto" data-i18n="auto"></button>
+            <button type="button" data-lang-val="en">English</button>
+            <button type="button" data-lang-val="tr">Türkçe</button>
           </div>
         </div>
       </fieldset>
@@ -139,19 +147,20 @@
   <dialog id="phoneDlg" class="sheet">
     <form method="dialog" class="sheet-inner center">
       <div class="sheet-head">
-        <h2>Use it on your phone</h2>
-        <button class="icon-btn ghost" value="close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        <h2 data-i18n="phone.title"></h2>
+        <button class="icon-btn ghost" value="close" data-i18n-attr="aria-label:close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       </div>
-      <p>Connect your phone to the <b>same Wi-Fi</b>, then scan the code or type the address.</p>
+      <p data-i18n-html="phone.dlg"></p>
       <div class="qr" data-qr></div>
       <code class="lan-url" data-lan></code>
-      <p class="tiny">Files are saved to whichever device you open Ardite on.</p>
+      <p class="tiny" data-i18n="phone.note"></p>
     </form>
   </dialog>
 
   <div id="toast" class="toast" role="status"></div>
 
   <script src="/vendor/qrcode.js" defer></script>
+  <script src="/i18n.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

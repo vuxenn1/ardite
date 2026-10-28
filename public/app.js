@@ -27,6 +27,7 @@ const settings = {
   audioFormat: 'mp3',
   autoSave: true,
   theme: 'auto',
+  lang: 'auto',
   ...store.get('settings', {}),
 };
 const saveSettings = () => store.set('settings', settings);
@@ -87,14 +88,22 @@ function fmtDuration(sec) {
 function fmtEta(sec) {
   if (sec == null || !isFinite(sec)) return '';
   sec = Math.max(1, Math.round(sec));
-  if (sec < 60) return `${sec}s left`;
-  return `${Math.floor(sec / 60)}m ${sec % 60}s left`;
+  if (sec < 60) return t('eta.s', sec);
+  return t('eta.m', Math.floor(sec / 60), sec % 60);
 }
 
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+// Server errors carry a code so they can be shown in the viewer's language
+function errText(e, fallback = 'err.generic') {
+  if (!e) return t(fallback);
+  const code = e.code || e.errorCode;
+  if (code && hasText('err.' + code)) return t('err.' + code);
+  return e.message || t(fallback);
+}
+
+const phaseText = (phase) => (phase && hasText('phase.' + phase) ? t('phase.' + phase) : phase);
 
 function qualityLabel(q) {
-  if (q === 'max') return settings.codec === 'h264' ? 'Auto' : 'Best';
+  if (q === 'max') return settings.codec === 'h264' ? t('q.auto') : t('q.best');
   const n = Number(q);
   if (n >= 4320) return '8K';
   if (n >= 2160) return '4K';
@@ -122,7 +131,7 @@ async function api(path, options = {}) {
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.message || 'Something went wrong.'), { status: res.status, data });
+  if (!res.ok) throw Object.assign(new Error(data.message || t('err.generic')), { status: res.status, data, code: data.code });
   return data;
 }
 
@@ -197,7 +206,7 @@ function loadPreview(url) {
       if (seq !== previewSeq) return;
       current.error = e;
       previewEl.className = 'card preview error';
-      previewEl.replaceChildren(h('div', {}, e.message, e.data?.detail && h('small', {}, e.data.detail)));
+      previewEl.replaceChildren(h('div', {}, errText(e), e.data?.detail && h('small', {}, e.data.detail)));
     });
   return current.promise;
 }
@@ -206,12 +215,12 @@ function videoRow(v) {
   const thumb = h('div', { class: 'thumb' }, img(v.thumbnail), v.duration && h('span', { class: 'dur' }, fmtDuration(v.duration)));
   const best = v.heights?.[0];
   return h('div', { class: 'pv-row video' }, thumb, h('div', { class: 'pv-info' },
-    h('div', { class: 'pv-title', title: v.title }, v.title || 'Untitled'),
+    h('div', { class: 'pv-title', title: v.title }, v.title || t('untitled')),
     h('div', { class: 'meta' },
       v.uploader && h('span', {}, v.uploader),
       v.site && h('span', { class: 'badge' }, v.site),
-      best && h('span', { class: 'badge' }, 'up to ' + qualityLabel(String(best))),
-      !v.hasVideo && h('span', { class: 'badge' }, 'audio only'))));
+      best && h('span', { class: 'badge' }, t('upTo', qualityLabel(String(best)))),
+      !v.hasVideo && h('span', { class: 'badge' }, t('audioOnly')))));
 }
 
 function playlistRow(p) {
@@ -221,14 +230,14 @@ function playlistRow(p) {
     h('div', { class: 'pv-title', title: p.title }, p.title),
     h('div', { class: 'meta' },
       p.uploader && h('span', {}, p.uploader),
-      h('span', { class: 'badge' }, 'Playlist · ' + plural(p.count, 'video')))));
+      h('span', { class: 'badge' }, t('playlistBadge', p.count)))));
 }
 
 function batchButtonLabel(n) {
-  if (!n) return 'Select videos to download';
+  if (!n) return t('batch.select');
   return settings.mode === 'audio'
-    ? `Download ${n} as ${settings.audioFormat === 'best' ? 'audio' : settings.audioFormat.toUpperCase()}`
-    : `Download ${plural(n, 'video')}`;
+    ? t('batch.audio', n, settings.audioFormat === 'best' ? t('batch.audioAny') : settings.audioFormat.toUpperCase())
+    : t('batch.video', n);
 }
 
 function renderPreview() {
@@ -245,8 +254,8 @@ function renderPreview() {
   const parts = [];
   if (d.video) {
     parts.push(h('div', { class: 'scope' }, h('div', { class: 'mini-seg' },
-      h('button', { type: 'button', 'aria-pressed': String(p.scope === 'video'), onclick: () => setScope('video') }, 'This video'),
-      h('button', { type: 'button', 'aria-pressed': String(p.scope === 'playlist'), onclick: () => setScope('playlist') }, `Whole playlist (${d.count})`))));
+      h('button', { type: 'button', 'aria-pressed': String(p.scope === 'video'), onclick: () => setScope('video') }, t('scope.video')),
+      h('button', { type: 'button', 'aria-pressed': String(p.scope === 'playlist'), onclick: () => setScope('playlist') }, t('scope.playlist', d.count)))));
   }
 
   if (p.scope === 'video' && d.video) {
@@ -269,8 +278,8 @@ function renderPreview() {
           renderPreview();
         },
       }),
-      'Select all'),
-    h('span', {}, `${n} of ${d.entries.length} selected`)));
+      t('selectAll')),
+    h('span', {}, t('selected', n, d.entries.length))));
 
   const list = h('ul', { class: 'pl-list' }, d.entries.map((e) => h('li', { class: e.unavailable ? 'off' : null },
     h('label', {},
@@ -286,10 +295,10 @@ function renderPreview() {
       h('div', { class: 'pl-thumb' }, img(e.thumbnail)),
       h('div', { class: 'pl-text' },
         h('div', { class: 'pl-name', title: e.title }, e.title),
-        h('div', { class: 'pl-dur' }, e.unavailable ? 'Unavailable' : fmtDuration(e.duration)))))));
+        h('div', { class: 'pl-dur' }, e.unavailable ? t('unavailable') : fmtDuration(e.duration)))))));
   parts.push(list);
 
-  if (d.truncated) parts.push(h('p', { class: 'hint' }, `Only the first ${d.entries.length} videos are shown.`));
+  if (d.truncated) parts.push(h('p', { class: 'hint' }, t('truncated', d.entries.length)));
   parts.push(h('button', { type: 'button', class: 'primary-btn wide', 'data-batch-btn': '', disabled: !n, onclick: startBatch },
     icon('save'), batchButtonLabel(n)));
 
@@ -306,7 +315,7 @@ function updatePlaylistCounters() {
   const all = $('.pl-toolbar input', previewEl);
   all.checked = n === available && n > 0;
   all.indeterminate = n > 0 && n < available;
-  $('.pl-toolbar span', previewEl).textContent = `${n} of ${d.entries.length} selected`;
+  $('.pl-toolbar span', previewEl).textContent = t('selected', n, d.entries.length);
   const btn = $('[data-batch-btn]', previewEl);
   btn.disabled = !n;
   btn.replaceChildren(icon('save'), batchButtonLabel(n));
@@ -338,11 +347,11 @@ $('#clearBtn').addEventListener('click', () => {
 $('#pasteBtn').addEventListener('click', async () => {
   try {
     const url = extractUrl(await navigator.clipboard.readText());
-    if (!url) return toast('No link on the clipboard.');
+    if (!url) return toast(t('toast.noClipLink'));
     input.value = url;
     schedulePreview(true);
   } catch {
-    toast('Couldn\'t read the clipboard. Paste the link manually.');
+    toast(t('toast.clipFail'));
   }
 });
 
@@ -355,7 +364,7 @@ form.addEventListener('submit', async (e) => {
     form.classList.remove('shake');
     void form.offsetWidth;
     form.classList.add('shake');
-    toast(input.value.trim() ? 'That doesn\'t look like a link.' : 'Paste a link first.');
+    toast(input.value.trim() ? t('toast.notLink') : t('toast.pasteFirst'));
     return;
   }
 
@@ -363,11 +372,11 @@ form.addEventListener('submit', async (e) => {
   if (looksLikePlaylist(url)) {
     if (preview?.url !== url) loadPreview(url);
     if (!preview.data && !preview.error) {
-      toast('Loading the playlist…');
+      toast(t('toast.loadingPlaylist'));
       await preview.promise;
     }
     if (preview?.url !== url) return;
-    if (preview.error) return toast(preview.error.message);
+    if (preview.error) return toast(errText(preview.error));
     if (preview.data?.type === 'playlist' && preview.scope === 'playlist') return startBatch();
   }
   startJob(url);
@@ -395,7 +404,7 @@ function renderOpts() {
   hint.hidden = true;
 
   if (settings.mode === 'audio') {
-    const formats = [['mp3', 'MP3'], ['m4a', 'M4A'], ['opus', 'OPUS'], ['wav', 'WAV'], ['best', 'Original']];
+    const formats = [['mp3', 'MP3'], ['m4a', 'M4A'], ['opus', 'OPUS'], ['wav', 'WAV'], ['best', t('fmt.original')]];
     box.replaceChildren(...formats.map(([v, label]) => chip(label, settings.audioFormat === v, () => {
       settings.audioFormat = v;
       saveSettings();
@@ -418,9 +427,8 @@ function renderOpts() {
 
   if (settings.codec === 'h264' && selected === 'max') {
     hint.hidden = false;
-    hint.replaceChildren(
-      'Auto picks the best MP4 that plays everywhere (usually 1080p on YouTube). For 4K, pick 4K or switch to "Highest quality" in ',
-      h('button', { type: 'button', onclick: openSettings }, 'Settings'), '.');
+    const [before, after] = t('hint.auto').split('{settings}');
+    hint.replaceChildren(before, h('button', { type: 'button', onclick: openSettings }, t('settings')), after || '');
   }
 }
 
@@ -455,7 +463,7 @@ async function startJob(url) {
     addTask('job', job, meta, false);
     clearInput();
   } catch (e) {
-    toast(e.message);
+    toast(errText(e));
   } finally {
     goBtn.disabled = false;
   }
@@ -466,14 +474,14 @@ async function startBatch() {
   if (!d || d.type !== 'playlist') return;
   const entries = d.entries.filter((e) => preview.selected.has(e.index) && !e.unavailable)
     .map((e) => ({ index: e.index, url: e.url, title: e.title }));
-  if (!entries.length) return toast('Select at least one video.');
+  if (!entries.length) return toast(t('toast.selectOne'));
   const meta = { url: preview.url, mode: settings.mode, title: d.title, thumbnail: d.thumbnail };
   try {
     const batch = await api('/api/batches', { method: 'POST', body: { url: preview.url, title: d.title, entries, ...currentOptions() } });
     addTask('batch', batch, meta, false);
     clearInput();
   } catch (e) {
-    toast(e.message);
+    toast(errText(e));
   }
 }
 
@@ -517,12 +525,12 @@ function update(task, data) {
 
   if (task.kind === 'batch') {
     addHistory({ kind: 'playlist', url: task.meta.url, mode: task.meta.mode, title: data.title, count: data.done, size: data.size });
-    toast(data.failed ? `Playlist ready, ${data.failed} failed.` : 'Playlist ready.');
+    toast(data.failed ? t('toast.playlistReadyFailed', data.failed) : t('toast.playlistReady'));
   } else if (data.status === 'done') {
     addHistory({ kind: 'video', url: task.meta.url, mode: task.meta.mode, title: data.title || task.meta.title, size: data.size, ext: (data.fileName || '').split('.').pop() });
     if (settings.autoSave && !task.saved) saveTask(task);
   } else if (data.status === 'error') {
-    toast(data.error?.message || 'Download failed.');
+    toast(errText(data.error, 'err.failed'));
   }
 }
 
@@ -552,12 +560,12 @@ function render(task) {
 }
 
 function jobStatusText(d) {
-  if (d.status === 'queued') return 'Waiting in queue…';
-  if (d.status === 'done') return ['Ready', fmtBytes(d.size)].filter(Boolean).join(' · ');
-  if (d.status === 'error') return d.error?.message || 'Failed';
-  if (d.status === 'canceled') return 'Canceled';
+  if (d.status === 'queued') return t('st.queued');
+  if (d.status === 'done') return [t('st.ready'), fmtBytes(d.size)].filter(Boolean).join(' · ');
+  if (d.status === 'error') return errText(d.error, 'st.failed');
+  if (d.status === 'canceled') return t('st.canceled');
   const p = d.progress || {};
-  const parts = [d.phase];
+  const parts = [phaseText(d.phase)];
   if (d.status === 'running' && p.downloaded != null) {
     parts.push(p.total ? `${fmtBytes(p.downloaded)} / ${fmtBytes(p.total)}` : fmtBytes(p.downloaded));
     if (p.speed) parts.push(fmtBytes(p.speed) + '/s');
@@ -574,7 +582,7 @@ function closeButton(task) {
   const final = taskFinished(task);
   return h('button', {
     type: 'button', class: 'icon-btn ghost',
-    'aria-label': final ? 'Remove' : 'Cancel', title: final ? 'Remove' : 'Cancel',
+    'aria-label': final ? t('remove') : t('cancel'), title: final ? t('remove') : t('cancel'),
     // finished batches are deleted on the server too, to free the disk space right away
     onclick: () => (final && task.kind !== 'batch' ? removeTask(task) : cancelTask(task)),
   }, icon('close'));
@@ -591,10 +599,10 @@ function renderJob(task) {
     actions.append(h('a', {
       class: 'primary-btn', href: `/api/jobs/${d.id}/file`, download: '',
       onclick: () => { task.saved = true; persistTasks(); },
-    }, icon('save'), 'Save'));
+    }, icon('save'), t('save')));
   }
   if (d.status === 'error') {
-    actions.append(h('button', { type: 'button', class: 'secondary-btn', onclick: () => { removeTask(task); setMode(meta.mode); startJob(meta.url); } }, 'Retry'));
+    actions.append(h('button', { type: 'button', class: 'secondary-btn', onclick: () => { removeTask(task); setMode(meta.mode); startJob(meta.url); } }, t('retry')));
   }
   actions.append(closeButton(task));
 
@@ -611,24 +619,24 @@ function renderJob(task) {
 
 function batchStatusText(d) {
   if (d.finished) {
-    if (!d.done) return d.canceled === d.total ? 'Canceled' : 'All downloads failed';
-    return [plural(d.done, 'file'), fmtBytes(d.size), d.failed && `${d.failed} failed`].filter(Boolean).join(' · ');
+    if (!d.done) return d.canceled === d.total ? t('st.canceled') : t('st.allFailed');
+    return [t('files', d.done), fmtBytes(d.size), d.failed && t('nFailed', d.failed)].filter(Boolean).join(' · ');
   }
   const active = d.items.filter((i) => i.status === 'running' || i.status === 'processing').length;
-  return [`${d.done} of ${d.total} done`, active && `downloading ${active}`, d.failed && `${d.failed} failed`].filter(Boolean).join(' · ');
+  return [t('b.progress', d.done, d.total), active && t('b.active', active), d.failed && t('nFailed', d.failed)].filter(Boolean).join(' · ');
 }
 
 function itemState(i) {
-  if (i.status === 'done') return h('span', { class: 'it-state ok' }, fmtBytes(i.size) || 'Ready');
-  if (i.status === 'error') return h('span', { class: 'it-state bad', title: i.error || '' }, 'Failed');
-  if (i.status === 'canceled') return h('span', { class: 'it-state' }, 'Canceled');
-  if (i.status === 'queued') return h('span', { class: 'it-state' }, 'Queued');
+  if (i.status === 'done') return h('span', { class: 'it-state ok' }, fmtBytes(i.size) || t('st.ready'));
+  if (i.status === 'error') return h('span', { class: 'it-state bad', title: i.error ? errText({ code: i.errorCode, message: i.error }) : '' }, t('st.failed'));
+  if (i.status === 'canceled') return h('span', { class: 'it-state' }, t('st.canceled'));
+  if (i.status === 'queued') return h('span', { class: 'it-state' }, t('st.queuedShort'));
   return h('span', { class: 'it-state' }, i.percent != null && i.status === 'running' ? `${Math.floor(i.percent)}%` : '…');
 }
 
 async function saveAll(task) {
   const done = task.data.items.filter((i) => i.status === 'done');
-  toast(`Saving ${plural(done.length, 'file')}… your browser may ask to allow multiple downloads.`);
+  toast(t('toast.saving', done.length));
   for (const i of done) {
     download(`/api/jobs/${i.id}/file`);
     await new Promise((r) => setTimeout(r, 800));
@@ -642,16 +650,16 @@ function renderBatch(task) {
   const actions = h('div', { class: 'batch-actions' });
   if (d.finished && d.done) {
     actions.append(
-      h('a', { class: 'primary-btn', href: `/api/batches/${d.id}/zip`, download: '' }, icon('zip'), 'Download ZIP'),
-      h('button', { type: 'button', class: 'secondary-btn', onclick: () => saveAll(task) }, icon('save'), 'Save all'));
+      h('a', { class: 'primary-btn', href: `/api/batches/${d.id}/zip`, download: '' }, icon('zip'), t('zip')),
+      h('button', { type: 'button', class: 'secondary-btn', onclick: () => saveAll(task) }, icon('save'), t('saveAll')));
   }
 
   const scroll = $('.items', task.el)?.scrollTop || 0;
   const list = task.expanded ? h('ul', { class: 'items' }, d.items.map((i) => h('li', {},
     h('div', { style: 'min-width:0' },
-      h('div', { class: 'it-name', title: i.title || '' }, i.title || 'Video'),
+      h('div', { class: 'it-name', title: i.title || '' }, i.title || t('item')),
       itemState(i)),
-    i.status === 'done' ? h('a', { class: 'it-save', href: `/api/jobs/${i.id}/file`, download: '', title: 'Save', 'aria-label': 'Save' }, icon('save')) : null))) : null;
+    i.status === 'done' ? h('a', { class: 'it-save', href: `/api/jobs/${i.id}/file`, download: '', title: t('save'), 'aria-label': t('save') }, icon('save')) : null))) : null;
 
   task.el.className = `card job batch ${status}`;
   task.el.replaceChildren(
@@ -666,7 +674,7 @@ function renderBatch(task) {
     h('button', {
       type: 'button', class: 'toggle-btn', 'aria-expanded': String(task.expanded),
       onclick: () => { task.expanded = !task.expanded; render(task); },
-    }, task.expanded ? 'Hide items' : `Show ${plural(d.total, 'item')}`, icon('chevron')),
+    }, task.expanded ? t('items.hide') : t('items.show', d.total), icon('chevron')),
     list);
   if (list) list.scrollTop = scroll;
 }
@@ -683,7 +691,8 @@ async function restoreTasks() {
 
 // ---------- history ----------
 
-const fmtDate = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const makeDateFormat = () => new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : lang, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+let fmtDate = makeDateFormat();
 
 function addHistory(entry) {
   const list = store.get('history', []);
@@ -698,7 +707,7 @@ function renderHistory() {
   $('#history').replaceChildren(...list.map((item) => {
     const isList = item.kind === 'playlist';
     const meta = isList
-      ? [fmtDate.format(item.date), plural(item.count || 0, 'file'), fmtBytes(item.size)]
+      ? [fmtDate.format(item.date), t('files', item.count || 0), fmtBytes(item.size)]
       : [fmtDate.format(item.date), item.ext?.toUpperCase(), fmtBytes(item.size)];
     return h('li', {},
       h('div', { class: 'h-icon' }, icon(isList ? 'list' : item.mode === 'audio' ? 'audio' : 'video')),
@@ -718,7 +727,7 @@ function renderHistory() {
             startJob(item.url);
           }
         },
-      }, 'Again'));
+      }, t('again')));
   }));
 }
 
@@ -735,6 +744,7 @@ function openSettings() {
   for (const r of $$('input[name="codec"]', settingsDlg)) r.checked = r.value === settings.codec;
   $('input[name="autoSave"]', settingsDlg).checked = settings.autoSave;
   applyTheme();
+  markLang();
   settingsDlg.showModal();
 }
 
@@ -752,6 +762,31 @@ for (const b of $$('[data-theme-val]')) {
     settings.theme = b.dataset.themeVal;
     saveSettings();
     applyTheme();
+  });
+}
+
+function markLang() {
+  for (const b of $$('[data-lang-val]')) b.setAttribute('aria-pressed', String(b.dataset.langVal === settings.lang));
+}
+
+// Re-renders everything in the new language without reloading the page
+function applyLang() {
+  setLang(settings.lang);
+  fmtDate = makeDateFormat();
+  applyI18n();
+  markLang();
+  renderOpts();
+  renderPreview();
+  for (const task of tasks.values()) render(task);
+  renderHistory();
+  renderFoot();
+}
+
+for (const b of $$('[data-lang-val]')) {
+  b.addEventListener('click', () => {
+    settings.lang = b.dataset.langVal;
+    saveSettings();
+    applyLang();
   });
 }
 
@@ -776,11 +811,18 @@ function renderQr(url) {
   for (const el of $$('[data-qr]')) el.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
 }
 
+let serverStatus = null;
+
+function renderFoot() {
+  if (serverStatus) $('#footInfo').textContent = t('foot.version', serverStatus.ytdlp || '?');
+}
+
 async function loadStatus() {
   try {
     const s = await api('/api/status');
+    serverStatus = s;
     const lan = s.lan?.[0];
-    $('#footInfo').textContent = `Running on your home PC · yt-dlp ${s.ytdlp || '?'}`;
+    renderFoot();
     $('#aboutLine').textContent = `Ardite · yt-dlp ${s.ytdlp || '?'}${lan ? ' · ' + lan : ''}`;
     if (lan) {
       renderQr(lan);
@@ -797,6 +839,7 @@ $('#phoneBtn').addEventListener('click', () => $('#phoneDlg').showModal());
 
 // ---------- startup ----------
 
+applyI18n();
 applyTheme();
 setMode(settings.mode === 'audio' ? 'audio' : 'video');
 updateInputButtons();

@@ -92,23 +92,26 @@ function isValidUrl(value) {
   }
 }
 
-// Turns yt-dlp errors into short, human-readable messages
+// Turns yt-dlp errors into short, human-readable messages.
+// "code" lets the web UI show the message in the viewer's language.
 function friendlyError(raw) {
   const msg = (raw || '').replace(/^ERROR:\s*/, '').trim();
   const rules = [
-    [/Unsupported URL/i, 'This site or link isn\'t supported.'],
-    [/Sign in to confirm (your age|you.re not a bot)/i, 'YouTube wants you to sign in. Adding cookies should fix it (see README.md).'],
-    [/private video|This video is private/i, 'This video is private.'],
-    [/login required|requires? (a )?log ?in|rate-limit reached|cookies/i, 'This content requires login. Adding cookies should fix it (see README.md).'],
-    [/Requested format is not available/i, 'That quality isn\'t available for this video. Try another one.'],
-    [/Video unavailable|not available|has been removed|404/i, 'Video not found or removed.'],
-    [/Unable to download webpage|getaddrinfo|timed out|Connection/i, 'Couldn\'t reach the site. Check your internet connection.'],
-    [/No video formats found|There is no video in this post|No video could be found/i, 'No downloadable video found at this link.'],
-    [/Not found/i, 'Video not found or removed.'],
+    [/Unsupported URL/i, 'unsupported', 'This site or link isn\'t supported.'],
+    [/Sign in to confirm (your age|you.re not a bot)/i, 'signin', 'YouTube wants you to sign in. Adding cookies should fix it (see README.md).'],
+    [/private video|This video is private/i, 'private', 'This video is private.'],
+    [/login required|requires? (a )?log ?in|rate-limit reached|cookies/i, 'login', 'This content requires login. Adding cookies should fix it (see README.md).'],
+    [/Requested format is not available/i, 'format', 'That quality isn\'t available for this video. Try another one.'],
+    [/Video unavailable|not available|has been removed|404/i, 'notFound', 'Video not found or removed.'],
+    [/Unable to download webpage|getaddrinfo|timed out|Connection/i, 'network', 'Couldn\'t reach the site. Check your internet connection.'],
+    [/No video formats found|There is no video in this post|No video could be found/i, 'noVideo', 'No downloadable video found at this link.'],
+    [/Not found/i, 'notFound', 'Video not found or removed.'],
   ];
-  for (const [re, text] of rules) if (re.test(msg)) return { message: text, detail: msg };
-  return { message: 'Download failed.', detail: msg || 'Unknown error' };
+  for (const [re, code, text] of rules) if (re.test(msg)) return { code, message: text, detail: msg };
+  return { code: 'failed', message: 'Download failed.', detail: msg || 'Unknown error' };
 }
+
+const fail = (code, message) => ({ code, message });
 
 function lastError(stderr) {
   const lines = stderr.split(/\r?\n/).filter((l) => l.startsWith('ERROR:'));
@@ -342,8 +345,8 @@ function parseProgress(job, line) {
   const isAudioPart = vcodec === 'none' && acodec !== 'none';
   const isVideoPart = acodec === 'none' && vcodec !== 'none';
   job.status = 'running';
-  job.phase = job.opts.mode === 'audio' || isAudioPart ? 'Downloading audio'
-    : isVideoPart ? 'Downloading video' : 'Downloading';
+  job.phase = job.opts.mode === 'audio' || isAudioPart ? 'downloading-audio'
+    : isVideoPart ? 'downloading-video' : 'downloading';
   job.progress = {
     percent: t && d != null ? Math.min(100, (d / t) * 100) : null,
     downloaded: d,
@@ -356,10 +359,10 @@ function parseProgress(job, line) {
 
 function parseLog(job, line) {
   const stages = [
-    [/^\[Merger\]/, 'Merging video and audio'],
-    [/^\[ExtractAudio\]/, 'Converting audio'],
-    [/^\[(EmbedThumbnail|Metadata)\]/, 'Adding cover art'],
-    [/^\[(Fixup\w*|VideoRemuxer|VideoConvertor)\]/, 'Finishing up'],
+    [/^\[Merger\]/, 'merging'],
+    [/^\[ExtractAudio\]/, 'converting'],
+    [/^\[(EmbedThumbnail|Metadata)\]/, 'cover'],
+    [/^\[(Fixup\w*|VideoRemuxer|VideoConvertor)\]/, 'finishing'],
   ];
   for (const [re, phase] of stages) {
     if (re.test(line)) {
@@ -374,7 +377,7 @@ function parseLog(job, line) {
 
 function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
   job.status = 'running';
-  job.phase = 'Starting';
+  job.phase = 'starting';
   emit(job, true);
   fs.mkdirSync(job.dir, { recursive: true });
 
@@ -413,7 +416,7 @@ function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
     if (code !== 0 && transient && (job.attempts = (job.attempts || 0) + 1) <= 2) {
       log(`[${job.id}] transient error, retry ${job.attempts}/2`);
       fs.rmSync(job.dir, { recursive: true, force: true });
-      job.phase = 'Retrying';
+      job.phase = 'retrying';
       emit(job, true);
       return setTimeout(() => (job.status === 'canceled' ? finish(job) : runJob(job, {})), 3000 * job.attempts);
     }
@@ -433,7 +436,7 @@ function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
 
     if (!files.length) {
       job.status = 'error';
-      job.error = { message: 'No file was produced.', detail: stderr.slice(-500) };
+      job.error = { ...fail('noFile', 'No file was produced.'), detail: stderr.slice(-500) };
       return finish(job);
     }
 
@@ -442,7 +445,7 @@ function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
     job.size = files[0].size;
     job.title = job.title || path.parse(files[0].f).name.replace(/ \[[^\]]+\]$/, '');
     job.status = 'done';
-    job.phase = 'Ready';
+    job.phase = 'ready';
     job.progress = { ...job.progress, percent: 100 };
     log(`[${job.id}] done: ${job.fileName} (${(job.size / 1048576).toFixed(1)} MB)`);
     finish(job);
@@ -478,7 +481,7 @@ function cancelJob(job) {
   if (isFinal(job.status)) return;
   const wasQueued = job.status === 'queued';
   job.status = 'canceled';
-  job.phase = 'Canceled';
+  job.phase = 'canceled';
   if (wasQueued) emit(job, true);
   else killTree(job.proc); // finish() runs when the process exits
 }
@@ -508,7 +511,7 @@ function createJob(url, opts, extra = {}) {
     url,
     opts,
     status: 'queued',
-    phase: 'Queued',
+    phase: 'queued',
     progress: { percent: null },
     title: typeof extra.title === 'string' ? extra.title.slice(0, 300) : null,
     prefix: extra.prefix || null,
@@ -535,6 +538,7 @@ function publicBatch(batch) {
     percent: j.progress?.percent ?? null,
     size: j.size ?? null,
     error: j.error?.message ?? null,
+    errorCode: j.error?.code ?? null,
   }));
   const count = (s) => items.filter((i) => i.status === s).length;
   const active = items.filter((i) => i.status !== 'canceled');
@@ -589,7 +593,7 @@ function createBatch(body) {
   const entries = (Array.isArray(body.entries) ? body.entries : [])
     .filter((e) => e && isValidUrl(e.url))
     .slice(0, config.maxPlaylistItems);
-  if (!entries.length) throw new Error('No videos selected.');
+  if (!entries.length) throw Object.assign(new Error('No videos selected.'), { code: 'noSelection' });
 
   const id = crypto.randomBytes(6).toString('hex');
   const batch = {
@@ -613,7 +617,7 @@ function createBatch(body) {
 
 async function serveZip(res, batch) {
   const done = batch.jobs.filter((j) => j.status === 'done' && j.file && fs.existsSync(j.file));
-  if (!done.length) return sendJson(res, 404, { message: 'Nothing finished yet.' });
+  if (!done.length) return sendJson(res, 404, fail('nothingDone', 'Nothing finished yet.'));
   const entries = [];
   for (const j of done) {
     j.crc ??= await fileCrc32(j.file);
@@ -770,17 +774,17 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === '/api/info' && req.method === 'POST') {
       const body = await readBody(req);
-      if (!isValidUrl(body.url)) return sendJson(res, 400, { message: 'Enter a valid link.' });
+      if (!isValidUrl(body.url)) return sendJson(res, 400, fail('invalidUrl', 'Enter a valid link.'));
       try {
         return sendJson(res, 200, await getInfo(body.url));
       } catch (e) {
-        return sendJson(res, 422, e?.message ? e : { message: 'Couldn\'t get video info.' });
+        return sendJson(res, 422, e?.message ? e : fail('noInfo', 'Couldn\'t get video info.'));
       }
     }
 
     if (pathname === '/api/jobs' && req.method === 'POST') {
       const body = await readBody(req);
-      if (!isValidUrl(body.url)) return sendJson(res, 400, { message: 'Enter a valid link.' });
+      if (!isValidUrl(body.url)) return sendJson(res, 400, fail('invalidUrl', 'Enter a valid link.'));
       return sendJson(res, 201, publicJob(createJob(body.url, parseOptions(body), { title: body.title })));
     }
 
@@ -789,7 +793,7 @@ const server = http.createServer(async (req, res) => {
       try {
         return sendJson(res, 201, publicBatch(createBatch(body)));
       } catch (e) {
-        return sendJson(res, 400, { message: e.message });
+        return sendJson(res, 400, fail(e.code, e.message));
       }
     }
 
@@ -802,7 +806,7 @@ const server = http.createServer(async (req, res) => {
           res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
           return res.end('File not found or expired.');
         }
-        return sendJson(res, 404, { message: 'Job not found.' });
+        return sendJson(res, 404, fail('jobNotFound', 'Job not found.'));
       }
       if (!sub && req.method === 'GET') return sendJson(res, 200, publicJob(job));
       if (!sub && req.method === 'DELETE') {
@@ -822,7 +826,7 @@ const server = http.createServer(async (req, res) => {
     if (bm) {
       const batch = batches.get(bm[1]);
       const sub = bm[3];
-      if (!batch) return sendJson(res, 404, { message: 'Playlist not found.' });
+      if (!batch) return sendJson(res, 404, fail('playlistNotFound', 'Playlist not found.'));
       if (!sub && req.method === 'GET') return sendJson(res, 200, publicBatch(batch));
       if (!sub && req.method === 'DELETE') {
         removeBatch(batch);
@@ -840,7 +844,7 @@ const server = http.createServer(async (req, res) => {
     res.end();
   } catch (e) {
     log('request error:', e.message);
-    if (!res.headersSent) sendJson(res, 400, { message: 'Bad request.' });
+    if (!res.headersSent) sendJson(res, 400, fail('badRequest', 'Bad request.'));
     else res.end();
   }
 });
