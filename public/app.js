@@ -178,6 +178,10 @@ function applyTheme() {
 const form = $('#form');
 const input = $('#url');
 const previewEl = $('#preview');
+const optsPanel = $('#optsPanel');
+// The options live in the card of the video they apply to. While no video is shown they're
+// parked in a hidden holder, so they stay in the page and keep their state.
+const parkPanel = () => $('#optsHolder').append(optsPanel);
 let preview = null; // { url, data, error, promise, scope, selected:Set }
 let previewSeq = 0;
 let previewTimer;
@@ -192,6 +196,7 @@ function resetPreview() {
   clearTimeout(previewTimer);
   previewSeq++;
   preview = null;
+  parkPanel();
   previewEl.hidden = true;
   previewEl.className = 'card preview';
   previewEl.replaceChildren();
@@ -201,6 +206,10 @@ function resetPreview() {
 function loadPreview(url) {
   const seq = ++previewSeq;
   preview = { url, data: null, error: null, scope: 'video', selected: new Set() };
+  // trimming and subtitles belong to one video; a new link starts without them
+  resetTrim();
+  resetSubs();
+  parkPanel();
   previewEl.hidden = false;
   previewEl.className = 'card preview';
   previewEl.replaceChildren(h('div', { class: 'pv-row' },
@@ -225,6 +234,7 @@ function loadPreview(url) {
     .catch((e) => {
       if (seq !== previewSeq) return;
       current.error = e;
+      parkPanel();
       previewEl.className = 'card preview error';
       previewEl.replaceChildren(h('div', {}, errText(e), e.data?.detail && h('small', {}, e.data.detail)));
     });
@@ -267,7 +277,7 @@ function renderPreview() {
   previewEl.className = 'card preview';
 
   if (d.type === 'video') {
-    previewEl.replaceChildren(videoRow(d));
+    previewEl.replaceChildren(videoRow(d), optsPanel);
     return;
   }
 
@@ -280,11 +290,12 @@ function renderPreview() {
 
   if (p.scope === 'video' && d.video) {
     parts.unshift(videoRow(d.video));
-    previewEl.replaceChildren(...parts);
+    previewEl.replaceChildren(...parts, optsPanel);
     return;
   }
 
   parts.unshift(playlistRow(d));
+  parts.push(optsPanel);
   const available = d.entries.filter((e) => !e.unavailable);
   const n = p.selected.size;
   const all = n === available.length && n > 0;
@@ -446,60 +457,124 @@ function previewVideo(url) {
   return preview.data?.type === 'video' ? preview.data : preview.data?.video || null;
 }
 
+const trimFrom = $('#trimFrom');
+const trimTo = $('#trimTo');
+const trimStartEl = $('#trimStart');
+const trimEndEl = $('#trimEnd');
+const currentDuration = () => (preview?.url && previewVideo(preview.url)?.duration) || 0;
+
 function trimChip() {
   return h('button', {
     type: 'button', class: 'chip with-icon', 'aria-pressed': String(trimUI.open), 'aria-controls': 'trimBox',
     onclick: () => {
       trimUI.open = !trimUI.open;
+      if (trimUI.open) setupTrimRange();
       renderOpts();
-      if (trimUI.open) $('#trimStart').focus();
     },
   }, icon('cut'), t('trim'));
 }
 
-function renderTrim() {
-  const box = $('#trimBox');
-  box.hidden = !(trimUI.open && trimAllowed());
-  const duration = preview?.url && previewVideo(preview.url)?.duration;
-  $('#trimEnd').placeholder = duration ? fmtClock(duration) : t('trim.endPh');
+// The slider runs from 0:00 to the video's length; the time boxes show (and can fine-tune) it
+function setupTrimRange() {
+  const duration = Math.floor(currentDuration());
+  $('#trimRange').hidden = !duration;
+  if (!duration) return;
+  trimFrom.max = trimTo.max = String(duration);
+  const start = parseClock(trimStartEl.value);
+  const end = parseClock(trimEndEl.value);
+  trimFrom.value = String(Number.isFinite(start) && start != null ? start : 0);
+  trimTo.value = String(Number.isFinite(end) && end != null ? end : duration);
+  syncTrimFromSlider();
 }
 
-// Returns the trim to send: null for the whole video, undefined if the times are wrong
-function readTrim(url) {
-  if (!trimUI.open) return null;
-  const startEl = $('#trimStart');
-  const endEl = $('#trimEnd');
-  const start = parseClock(startEl.value);
-  const end = parseClock(endEl.value);
-  startEl.removeAttribute('aria-invalid');
-  endEl.removeAttribute('aria-invalid');
+function syncTrimFromSlider(moved) {
+  let a = Number(trimFrom.value);
+  let b = Number(trimTo.value);
+  // keep at least one second between the handles
+  if (a > b - 1) {
+    if (moved === trimFrom) a = Math.max(0, b - 1);
+    else b = Math.min(Number(trimTo.max), a + 1);
+    trimFrom.value = String(a);
+    trimTo.value = String(b);
+  }
+  trimStartEl.value = fmtClock(a);
+  trimEndEl.value = fmtClock(b);
+  trimStartEl.removeAttribute('aria-invalid');
+  trimEndEl.removeAttribute('aria-invalid');
+  paintTrimRange();
+}
+
+function paintTrimRange() {
+  const max = Number(trimTo.max) || 1;
+  const a = Number(trimFrom.value);
+  const b = Number(trimTo.value);
+  const fill = $('#trimRange .range-fill');
+  fill.style.left = `${(a / max) * 100}%`;
+  fill.style.width = `${((b - a) / max) * 100}%`;
+  // the start handle goes on top when it's near the end, so it can still be dragged back
+  trimFrom.style.zIndex = a > max / 2 ? '3' : '1';
+  $('#trimLen').textContent = b > a ? `✂ ${fmtClock(b - a)}` : '';
+  updateGoLabel();
+}
+
+for (const el of [trimFrom, trimTo]) el.addEventListener('input', () => syncTrimFromSlider(el));
+
+// Typed times move the slider when they make sense
+for (const el of [trimStartEl, trimEndEl]) {
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') form.requestSubmit();
+  });
+  el.addEventListener('input', () => {
+    el.removeAttribute('aria-invalid');
+    const v = parseClock(el.value);
+    if (Number.isFinite(v) && v != null && !$('#trimRange').hidden) {
+      (el === trimStartEl ? trimFrom : trimTo).value = String(Math.min(v, Number(trimTo.max)));
+      paintTrimRange();
+    } else {
+      updateGoLabel();
+    }
+  });
+}
+
+function renderTrim() {
+  $('#trimBox').hidden = !(trimUI.open && trimAllowed());
+  const duration = currentDuration();
+  trimEndEl.placeholder = duration ? fmtClock(duration) : t('trim.endPh');
+}
+
+// Returns the trim to send: null for the whole video, undefined if the times are wrong.
+// quiet: only work it out (for the download button's label), without messages.
+function readTrim(url, quiet = false) {
+  if (!trimUI.open || !trimAllowed()) return null;
+  const start = parseClock(trimStartEl.value);
+  let end = parseClock(trimEndEl.value);
+  if (!quiet) {
+    trimStartEl.removeAttribute('aria-invalid');
+    trimEndEl.removeAttribute('aria-invalid');
+  }
   const bad = (el, message) => {
+    if (quiet) return undefined;
     el.setAttribute('aria-invalid', 'true');
     el.focus();
     toast(message);
+    return undefined;
   };
-  if (Number.isNaN(start)) return bad(startEl, t('trim.invalid'));
-  if (Number.isNaN(end)) return bad(endEl, t('trim.invalid'));
-  if (end != null && end <= (start || 0)) return bad(endEl, t('trim.order'));
+  if (Number.isNaN(start)) return bad(trimStartEl, t('trim.invalid'));
+  if (Number.isNaN(end)) return bad(trimEndEl, t('trim.invalid'));
+  if (end != null && end <= (start || 0)) return bad(trimEndEl, t('trim.order'));
   const duration = previewVideo(url)?.duration;
-  if (duration && (start || 0) >= duration) return bad(startEl, t('trim.tooLong', fmtClock(duration)));
-  if (duration && end != null && end > duration + 1) return bad(endEl, t('trim.tooLong', fmtClock(duration)));
+  if (duration && (start || 0) >= duration) return bad(trimStartEl, t('trim.tooLong', fmtClock(duration)));
+  if (duration && end != null && end > duration + 1) return bad(trimEndEl, t('trim.tooLong', fmtClock(duration)));
+  if (duration && end != null && end >= Math.floor(duration)) end = null; // up to the end
   if (!start && end == null) return null;
   return { start: start || 0, end, precise: $('#trimPrecise').checked };
 }
 
-// The time boxes sit outside the link form, so Enter there starts the download too
-for (const el of [$('#trimStart'), $('#trimEnd')]) {
-  el.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') form.requestSubmit();
-  });
-  el.addEventListener('input', () => el.removeAttribute('aria-invalid'));
-}
-
 function resetTrim() {
   trimUI.open = false;
-  $('#trimStart').value = '';
-  $('#trimEnd').value = '';
+  trimStartEl.value = '';
+  trimEndEl.value = '';
+  $('#trimLen').textContent = '';
   $('#trimPrecise').checked = false;
   renderTrim();
 }
@@ -560,6 +635,7 @@ function toggleSubLang(code, on) {
   const others = settings.subLangs.filter((c) => c !== code && c !== baseOf(code) && baseOf(c) !== baseOf(code));
   settings.subLangs = on ? [...others, code] : others;
   saveSettings();
+  updateGoLabel();
 }
 
 function subsChip() {
@@ -614,7 +690,7 @@ function renderSubs() {
       parts.push(h('label', { class: 'trim-precise' },
         h('input', {
           type: 'checkbox', class: 'check', checked: settings.subAuto,
-          onchange: (e) => { settings.subAuto = e.target.checked; saveSettings(); },
+          onchange: (e) => { settings.subAuto = e.target.checked; saveSettings(); updateGoLabel(); },
         }),
         h('span', {}, subs?.auto ? t('subs.autoOne', langName(subs.auto.code.replace(/-orig$/, ''))) : t('subs.autoAny'))));
     }
@@ -630,24 +706,23 @@ function renderSubs() {
   box.replaceChildren(...parts);
 }
 
-// What to send: null when off, undefined (after a message) when nothing usable is chosen
-function readSubs(url) {
+// What to send: null when off, undefined (after a message) when nothing usable is chosen.
+// quiet: only work it out, without messages.
+function readSubs(url, quiet = false) {
   if (!subsUI.open || settings.mode !== 'video') return null;
+  const say = (key) => {
+    if (!quiet) toast(t(key));
+    return undefined;
+  };
   const subs = url ? previewVideo(url)?.subs : previewSubs();
   let langs = settings.subLangs;
   let auto = settings.subAuto;
   if (subs) {
     langs = pickedCodes(subs.list);
     auto = auto && !!subs.auto;
-    if (!subs.list.length && !subs.auto) {
-      toast(t('subs.noneHere'));
-      return undefined;
-    }
+    if (!subs.list.length && !subs.auto) return say('subs.noneHere');
   }
-  if (!langs.length && !auto) {
-    toast(t('subs.pickOne'));
-    return undefined;
-  }
+  if (!langs.length && !auto) return say('subs.pickOne');
   return { langs, auto, srt: settings.subSrt };
 }
 
@@ -666,25 +741,10 @@ function subsLabel(s) {
   return `${t('subs')}: ${s.langs.map(short).join(', ')}`;
 }
 
-function renderOpts() {
-  const box = $('#opts');
-  const hint = $('#optsHint');
-  hint.hidden = true;
-  renderTrim();
-  renderSubs();
+const AUDIO_CHOICES = () => [['mp3', 'MP3'], ['m4a', 'M4A'], ['opus', 'OPUS'], ['wav', 'WAV'], ['best', t('fmt.original')]];
 
-  if (settings.mode === 'audio') {
-    const formats = [['mp3', 'MP3'], ['m4a', 'M4A'], ['opus', 'OPUS'], ['wav', 'WAV'], ['best', t('fmt.original')]];
-    box.replaceChildren(...formats.map(([v, label]) => chip(label, settings.audioFormat === v, () => {
-      settings.audioFormat = v;
-      saveSettings();
-      renderOpts();
-      if (preview?.data?.type === 'playlist' && preview.scope === 'playlist') updatePlaylistCounters();
-    })));
-    if (trimAllowed()) box.append(trimChip());
-    return;
-  }
-
+// Quality choices for the video in the card, plus which one is selected
+function qualityChoices() {
   const d = preview?.data;
   const v = d?.type === 'video' ? d : d?.video && preview.scope === 'video' ? d.video : null;
   const heights = v?.heights || [];
@@ -692,20 +752,73 @@ function renderOpts() {
   let list = ['max', '2160', '1440', '1080', '720', '480', '360'];
   if (heights.length) list = ['max', ...new Set(heights.filter((x) => x >= 240).map(String))].slice(0, 7);
   const selected = list.includes(String(settings.quality)) ? String(settings.quality) : 'max';
+  return { list, selected, fps, best: heights[0] };
+}
+
+function renderOpts() {
+  const box = $('#opts');
+  const hint = $('#optsHint');
+  hint.hidden = true;
+  renderTrim();
+  renderSubs();
+  // trimming and subtitles are per video, so they're left out for whole playlists
+  const extras = [];
+  if (trimAllowed()) extras.push(trimChip());
+  if (settings.mode === 'video') extras.push(subsChip());
+  $('#extras').replaceChildren(...extras);
+  $('#cardGo').hidden = !trimAllowed();
+
+  if (settings.mode === 'audio') {
+    $('#optsLabel').textContent = t('opts.format');
+    box.replaceChildren(...AUDIO_CHOICES().map(([v, label]) => chip(label, settings.audioFormat === v, () => {
+      settings.audioFormat = v;
+      saveSettings();
+      renderOpts();
+      if (preview?.data?.type === 'playlist' && preview.scope === 'playlist') updatePlaylistCounters();
+    })));
+    updateGoLabel();
+    return;
+  }
+
+  $('#optsLabel').textContent = t('opts.quality');
+  const { list, selected, fps } = qualityChoices();
   box.replaceChildren(...list.map((v) => chip(qualityLabel(v, fps[v]), v === selected, () => {
     settings.quality = v;
     saveSettings();
     renderOpts();
   })));
-  if (trimAllowed()) box.append(trimChip());
-  box.append(subsChip());
 
   if (settings.codec === 'h264' && selected === 'max') {
     hint.hidden = false;
     const [before, after] = t('hint.auto').split('{settings}');
     hint.replaceChildren(before, h('button', { type: 'button', onclick: openSettings }, t('settings')), after || '');
   }
+  updateGoLabel();
 }
+
+// The card's download button sums up what will be downloaded: "İndir · 1080p60 · ✂ 0:15 · TR"
+function updateGoLabel() {
+  const btn = $('#cardGo');
+  if (btn.hidden || !preview?.url) return;
+  const parts = [t('download')];
+  if (settings.mode === 'audio') {
+    parts.push(AUDIO_CHOICES().find(([v]) => v === settings.audioFormat)?.[1]);
+  } else {
+    const { selected, fps, best } = qualityChoices();
+    // "Best" shows what it will most likely be, e.g. 4K60
+    const q = selected === 'max' && settings.codec !== 'h264' && best ? String(best) : selected;
+    parts.push(qualityLabel(q, fps[q]));
+  }
+  const trim = readTrim(preview.url, true);
+  if (trim) parts.push(`✂ ${fmtClock((trim.end ?? currentDuration()) - trim.start)}`);
+  if (subsUI.open && settings.mode === 'video') {
+    const s = readSubs(preview.url, true);
+    if (s) parts.push([...s.langs.map((c) => baseOf(c).toUpperCase()), s.auto ? t('subs.autoShort') : ''].filter(Boolean).join(', '));
+  }
+  btn.replaceChildren(icon('save'), parts.filter(Boolean).join(' · '));
+}
+
+$('#cardGo').addEventListener('click', () => form.requestSubmit());
 
 const currentOptions = () => ({
   mode: settings.mode,
