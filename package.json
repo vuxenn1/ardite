@@ -1,6 +1,6 @@
 {
   "name": "ardite",
-  "version": "1.0.0",
+  "version": "0.0.0-dev",
   "description": "Self-hosted video downloader for your Windows PC, usable from any device on the same Wi-Fi",
   "license": "MIT",
   "type": "module",

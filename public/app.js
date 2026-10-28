@@ -823,6 +823,7 @@ function applyLang() {
   for (const task of tasks.values()) render(task);
   renderHistory();
   renderFoot();
+  renderUpdate();
 }
 
 for (const b of $$('[data-lang-val]')) {
@@ -860,13 +861,32 @@ function renderFoot() {
   if (serverStatus) $('#footInfo').textContent = t('foot.version', serverStatus.ytdlp || '?');
 }
 
+// "New version available" bar; closing it hides it until the next version comes out
+function renderUpdate() {
+  const bar = $('#updateBar');
+  const u = serverStatus?.update;
+  if (!u || store.get('dismissedUpdate') === u.version) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  bar.replaceChildren(
+    h('span', {}, t('update.text', u.version)),
+    h('a', { href: u.url, target: '_blank', rel: 'noopener noreferrer' }, t('update.link')),
+    h('button', {
+      type: 'button', class: 'icon-btn ghost', title: t('close'), 'aria-label': t('close'),
+      onclick: () => { store.set('dismissedUpdate', u.version); renderUpdate(); },
+    }, icon('close')));
+}
+
 async function loadStatus() {
   try {
     const s = await api('/api/status');
     serverStatus = s;
     const lan = s.lan?.[0];
     renderFoot();
-    $('#aboutLine').textContent = `Ardite · yt-dlp ${s.ytdlp || '?'}${lan ? ' · ' + lan : ''}`;
+    renderUpdate();
+    $('#aboutLine').textContent = `Ardite ${s.version ? 'v' + s.version : ''} · yt-dlp ${s.ytdlp || '?'}${lan ? ' · ' + lan : ''}`;
     if (lan) {
       renderQr(lan);
       $('#phoneBtn').hidden = isTouch;

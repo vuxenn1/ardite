@@ -359,6 +359,17 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .it-save:hover { background: var(--blue-soft); }
 .it-save svg { width: 17px; height: 17px; }
 
+/* ---------- update bar ---------- */
+.update-bar {
+  display: flex; align-items: center; gap: 4px 12px; flex-wrap: wrap;
+  margin-bottom: 20px; padding: 6px 6px 6px 16px; border-radius: 14px;
+  background: var(--blue-soft); font-size: 14px;
+}
+.update-bar[hidden] { display: none; }
+.update-bar span { flex: 1; min-width: 0; }
+.update-bar a { color: var(--blue); font-weight: 600; text-decoration: none; }
+.update-bar a:hover { text-decoration: underline; }
+
 /* ---------- history ---------- */
 .history { margin-top: 36px; }
 .sec-head { display: flex; justify-content: space-between; align-items: baseline; margin: 0 4px 8px; }

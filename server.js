@@ -29,6 +29,8 @@ const config = {
   keepFilesMinutes: 30,
   maxPlaylistItems: 500,
   cookiesFromBrowser: '', // e.g. "firefox", for sites that require login
+  updateCheck: true, // look for new Ardite releases on GitHub
+  repo: 'vuxenn1/ardite',
   ...readJson(path.join(DATA, 'config.json')),
 };
 if (process.env.PORT) config.port = Number(process.env.PORT);
@@ -50,7 +52,8 @@ function log(...parts) {
 
 function readJson(file) {
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
+    // Notepad may save UTF-8 with a BOM, which JSON.parse rejects
+    return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, ''));
   } catch {
     return {};
   }
@@ -704,6 +707,39 @@ async function serveZip(res, batch) {
   pipeline(stream, res, () => {});
 }
 
+// ---------- Ardite update check ----------
+
+// Release packages get their version from the git tag; running from source shows "0.0.0-dev"
+const VERSION = readJson(path.join(ROOT, 'package.json')).version || '0.0.0-dev';
+let latestRelease = null; // { version, url }
+
+function isNewer(a, b) {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  }
+  return false;
+}
+
+// Only asks GitHub which release is the latest; nothing is downloaded or installed automatically
+async function checkForUpdate() {
+  if (!config.updateCheck || !/^\d+\.\d+\.\d+$/.test(VERSION)) return;
+  try {
+    const res = await fetch(`https://api.github.com/repos/${config.repo}/releases/latest`, {
+      headers: { 'User-Agent': 'Ardite', Accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return;
+    const r = await res.json();
+    const version = String(r.tag_name || '').replace(/^v/, '');
+    const url = String(r.html_url || '');
+    if (!/^\d+\.\d+\.\d+$/.test(version) || !url.startsWith('https://github.com/')) return;
+    if (isNewer(version, VERSION) && latestRelease?.version !== version) log(`New Ardite version available: v${version}`);
+    latestRelease = { version, url };
+  } catch { /* offline, try again later */ }
+}
+
 // ---------- yt-dlp self-update ----------
 
 let ytdlpVersion = null;
@@ -834,6 +870,8 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/status' && req.method === 'GET') {
       return sendJson(res, 200, {
         name: 'Ardite',
+        version: VERSION,
+        update: latestRelease && isNewer(latestRelease.version, VERSION) ? latestRelease : null,
         ytdlp: ytdlpVersion,
         port: config.port,
         lan: lanAddresses().map((ip) => `http://${ip}:${config.port}`),
@@ -957,6 +995,8 @@ server.listen(config.port, config.host, () => {
   readVersion();
   setTimeout(updateYtdlp, 5000);
   setInterval(updateYtdlp, 12 * 60 * 60 * 1000);
+  setTimeout(checkForUpdate, 8000);
+  setInterval(checkForUpdate, 12 * 60 * 60 * 1000);
   // drop stale preview info
   setInterval(() => {
     for (const [url, entry] of infoCache) {
