@@ -1272,8 +1272,18 @@ function renderQr(url) {
 
 let serverStatus = null;
 
+// "Running on your home PC · v1.4.0 · yt-dlp 2026.10.26", the version linking to its release notes
 function renderFoot() {
-  if (serverStatus) $('#footInfo').textContent = t('foot.version', serverStatus.ytdlp || '?');
+  const s = serverStatus;
+  if (!s) return;
+  const repo = s.repo || $('#githubLink').href;
+  const released = /^\d+\.\d+\.\d+$/.test(s.version || '');
+  const version = s.version && h('a', {
+    href: released ? `${repo}/releases/tag/v${s.version}` : repo,
+    target: '_blank', rel: 'noopener noreferrer', title: released ? t('foot.release', s.version) : null,
+  }, released ? `v${s.version}` : 'dev');
+  const parts = [t('foot'), version, `yt-dlp ${s.ytdlp || '?'}`].filter(Boolean);
+  $('#footInfo').replaceChildren(...parts.flatMap((p, i) => (i ? [' · ', p] : [p])));
 }
 
 // "New version available" bar; closing it hides it until the next version comes out
@@ -1298,6 +1308,7 @@ async function loadStatus() {
   try {
     const s = await api('/api/status');
     serverStatus = s;
+    if (s.repo) $('#githubLink').href = s.repo;
     const lan = s.lan?.[0];
     renderFoot();
     renderUpdate();

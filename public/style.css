@@ -128,6 +128,8 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .top { grid-area: top; display: flex; align-items: center; justify-content: space-between; height: 52px; }
 .main { grid-area: main; min-width: 0; }
 .foot { grid-area: foot; text-align: center; color: var(--muted); font-size: 13px; padding-top: 32px; }
+.foot a { color: inherit; text-underline-offset: 2px; }
+.foot a:hover { color: var(--text); }
 
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-weight: 750; font-size: 20px; letter-spacing: -.02em; }
 .brand img { border-radius: 8px; }

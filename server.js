@@ -1081,6 +1081,7 @@ const server = http.createServer(async (req, res) => {
         update: latestRelease && isNewer(latestRelease.version, VERSION) ? latestRelease : null,
         ytdlp: ytdlpVersion,
         port: config.port,
+        repo: `https://github.com/${config.repo}`,
         lan: lanAddresses().map((ip) => `http://${ip}:${config.port}`),
         cookies: fs.existsSync(COOKIES_FILE) ? 'file' : config.cookiesFromBrowser || null,
       });

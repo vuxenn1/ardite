@@ -37,7 +37,8 @@ const STRINGS = {
     'device.linux': 'Linux',
     'device.other': 'Other device',
     'foot': 'Running on your home PC',
-    'foot.version': (v) => `Running on your home PC · yt-dlp ${v}`,
+    'foot.release': (v) => `What's new in v${v}`,
+    'github': 'Ardite on GitHub',
 
     'phone.btn': 'Open on your phone',
     'phone.title': 'Use it on your phone',
@@ -205,7 +206,8 @@ const STRINGS = {
     'device.linux': 'Linux',
     'device.other': 'Diğer cihaz',
     'foot': 'Evdeki bilgisayarında çalışıyor',
-    'foot.version': (v) => `Evdeki bilgisayarında çalışıyor · yt-dlp ${v}`,
+    'foot.release': (v) => `v${v} sürümünde neler var`,
+    'github': "GitHub'da Ardite",
 
     'phone.btn': 'Telefonda aç',
     'phone.title': 'Telefonunda kullan',
