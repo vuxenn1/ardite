@@ -68,7 +68,12 @@ Paste a link. The video shows up in a card with all its options: video or audio,
 
 ### Videos that need a login
 
-Some videos (age-restricted or private) require you to be signed in, and YouTube sometimes asks to confirm you're not a bot after many downloads. Put a `cookies.txt` file (Netscape format, exported with a browser extension) in the `data` folder. Keep it private.
+Some videos (age-restricted or private) require you to be signed in, and YouTube sometimes asks to confirm you're not a bot after many downloads. Add your login in **Settings > Videos that need a login**:
+
+- **Any browser**: install the [Get cookies.txt LOCALLY](https://github.com/kairi003/Get-cookies.txt-LOCALLY) extension, open youtube.com while signed in, export the cookies and press **Upload cookies.txt**. The file holds your login, so keep it private.
+- **Firefox**: when Firefox is installed, you can simply turn on **Use my Firefox login**.
+
+Chrome and Edge can't be read directly: on Windows they encrypt their logins in a way yt-dlp can't open, so use the extension for them. The **Test** button checks that the login can be read.
 
 ### Settings file
 
@@ -91,7 +96,7 @@ Optional settings go in `data/config.json`, for example:
 | `maxConcurrent` | Downloads running at the same time |
 | `keepFilesMinutes` | How long finished files wait on the PC to be saved |
 | `maxPlaylistItems` | Most videos shown for a playlist |
-| `cookiesFromBrowser` | Use a browser's login instead of `cookies.txt` (`firefox`, `chrome`, `edge`…) |
+| `cookiesFromBrowser` | Use a browser's login (`firefox`); set from Settings. Chrome and Edge don't work on Windows |
 | `updateCheck` | Look for new Ardite versions on GitHub |
 
 <details>

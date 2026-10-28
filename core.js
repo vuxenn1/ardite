@@ -17,9 +17,9 @@ export function friendlyError(raw) {
   const msg = (raw || '').replace(/^ERROR:\s*/, '').trim();
   const rules = [
     [/Unsupported URL/i, 'unsupported', 'This site or link isn\'t supported.'],
-    [/Sign in to confirm (your age|you.re not a bot)/i, 'signin', 'YouTube wants you to sign in. Adding cookies should fix it (see README.md).'],
+    [/Sign in to confirm (your age|you.re not a bot)/i, 'signin', 'YouTube wants you to sign in. Add a login in Settings.'],
     [/private video|This video is private/i, 'private', 'This video is private.'],
-    [/login required|requires? (a )?log ?in|rate-limit reached|cookies/i, 'login', 'This content requires login. Adding cookies should fix it (see README.md).'],
+    [/login required|requires? (a )?log ?in|rate-limit reached|cookies/i, 'login', 'This content needs a login. Add one in Settings.'],
     [/Requested format is not available/i, 'format', 'That quality isn\'t available for this video. Try another one.'],
     [/Video unavailable|not available|has been removed|404/i, 'notFound', 'Video not found or removed.'],
     [/Unable to download webpage|getaddrinfo|timed out|Connection/i, 'network', 'Couldn\'t reach the site. Check your internet connection.'],
@@ -192,6 +192,27 @@ export function isNewer(a, b) {
     if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
   }
   return false;
+}
+
+// Checks a cookies.txt (Netscape format, as browser extensions export it) without keeping any values.
+// yt-dlp refuses files without the header line, so that's required too.
+export function parseCookiesTxt(text) {
+  const lines = String(text || '').replace(/^﻿/, '').split(/\r?\n/);
+  if (!/^#\s*(Netscape )?HTTP Cookie File/i.test(lines[0] || '')) return { ok: false, reason: 'header' };
+  let count = 0;
+  const domains = new Set();
+  for (const line of lines) {
+    // "#HttpOnly_" lines are cookies too; other "#" lines are comments
+    const l = line.startsWith('#HttpOnly_') ? line.slice(10) : line;
+    if (!l.trim() || l.startsWith('#')) continue;
+    const f = l.split('\t');
+    if (f.length !== 7 || !/^\d+$/.test(f[4]) || !f[5]) continue;
+    count++;
+    domains.add(f[0].replace(/^\./, '').toLowerCase());
+  }
+  if (!count) return { ok: false, reason: 'empty' };
+  const has = (site) => [...domains].some((d) => d === site || d.endsWith('.' + site));
+  return { ok: true, count, sites: domains.size, youtube: has('youtube.com') };
 }
 
 // Download file name header: a plain ASCII fallback plus the real (UTF-8) name.

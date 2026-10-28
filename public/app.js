@@ -1297,9 +1297,103 @@ function openSettings() {
   applyTheme();
   markLang();
   settingsDlg.showModal();
+  loadLogin();
 }
 
 $('#settingsBtn').addEventListener('click', openSettings);
+
+// ---------- login for videos that need it (a setting of the PC, shared by all devices) ----------
+
+let login = null; // { active, file, browser, firefox }
+let loginTest = null; // { busy } or the last test result
+
+async function loadLogin() {
+  try {
+    login = await api('/api/login');
+  } catch { login = null; }
+  loginTest = null;
+  renderLogin();
+}
+
+function loginStatusText() {
+  if (login.file && !login.file.ok) return t('login.fileBad');
+  if (login.file) return t('login.fileOn', login.file.count, login.file.youtube);
+  if (login.browser) return t('login.firefoxOn');
+  return t('login.none');
+}
+
+function renderLogin() {
+  const box = $('#loginBox');
+  if (!login) return box.replaceChildren();
+  const parts = [h('p', { class: 'login-status' + (login.active ? ' on' : '') }, loginStatusText(),
+    login.file?.date && h('small', {}, fmtDate.format(login.file.date)))];
+
+  const buttons = h('div', { class: 'login-actions' },
+    h('button', { type: 'button', class: 'hist-btn', onclick: () => $('#cookieFile').click() },
+      login.file ? t('login.replace') : t('login.upload')),
+    login.file && h('button', { type: 'button', class: 'hist-btn', onclick: removeCookies }, t('remove')),
+    login.active && h('button', { type: 'button', class: 'hist-btn', disabled: !!loginTest?.busy, onclick: runLoginTest },
+      loginTest?.busy ? t('login.testing') : t('login.test')));
+  parts.push(buttons);
+  if (loginTest && !loginTest.busy) {
+    parts.push(h('p', { class: 'login-result ' + (loginTest.ok ? 'ok' : 'bad') },
+      loginTest.ok ? t('login.testOk', loginTest.count) : t('login.testFail', loginTest.detail || '')));
+  }
+
+  // Firefox's own login, only when Firefox is on this PC
+  if (login.firefox) {
+    parts.push(h('label', { class: 'switch-row' },
+      h('span', {}, h('b', {}, t('login.firefox')),
+        h('small', {}, login.file ? `${t('login.firefoxDesc')} ${t('login.fileWins')}` : t('login.firefoxDesc'))),
+      h('input', {
+        type: 'checkbox', class: 'switch', checked: login.browser === 'firefox',
+        onchange: async (e) => {
+          try {
+            login = await api('/api/login/browser', { method: 'PUT', body: { browser: e.target.checked ? 'firefox' : '' } });
+          } catch (err) { toast(errText(err)); }
+          loginTest = null;
+          renderLogin();
+        },
+      })));
+  }
+  parts.push(h('p', { class: 'tiny login-help' }, t('login.help')));
+  box.replaceChildren(...parts);
+}
+
+$('#cookieFile').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const res = await fetch('/api/login/file', { method: 'PUT', headers: { 'Content-Type': 'text/plain' }, body: await file.text() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(data.message || t('err.generic')), { code: data.code });
+    login = data;
+    loginTest = null;
+    renderLogin();
+  } catch (err) {
+    toast(errText(err));
+  }
+});
+
+async function removeCookies() {
+  try {
+    login = await api('/api/login/file', { method: 'DELETE' });
+  } catch (err) { toast(errText(err)); }
+  loginTest = null;
+  renderLogin();
+}
+
+async function runLoginTest() {
+  loginTest = { busy: true };
+  renderLogin();
+  try {
+    loginTest = await api('/api/login/test', { method: 'POST' });
+  } catch (err) {
+    loginTest = { ok: false, detail: errText(err) };
+  }
+  renderLogin();
+}
 
 settingsDlg.addEventListener('change', (e) => {
   if (e.target.name === 'codec') { settings.codec = e.target.value; settings.codecChosen = true; }
@@ -1331,6 +1425,7 @@ function applyLang() {
   for (const task of tasks.values()) render(task);
   renderHistory();
   renderHistoryTable();
+  renderLogin();
   renderFoot();
   renderUpdate();
 }

@@ -13,7 +13,7 @@ import { createZip, fileCrc32 } from './zip.js';
 import {
   isValidUrl, friendlyError, fail, lastError, shortSide, summarizeVideo, summarizePlaylist,
   videoStats, linkKind, expectedHeight, codecName, parseOptions, parseTrim, fileClock, isNewer,
-  contentDisposition,
+  contentDisposition, parseCookiesTxt,
 } from './core.js';
 import { subtitleArgs, findSubFiles, shiftSrt, embedSubs } from './subs.js';
 import { createUpdater, readRelease } from './updater.js';
@@ -93,9 +93,18 @@ function commonArgs() {
     // YouTube needs a JavaScript runtime for signature solving; reuse the Node we're running on
     '--js-runtimes', `node:${process.execPath}`,
   ];
-  if (fs.existsSync(COOKIES_FILE)) args.push('--cookies', COOKIES_FILE);
+  if (cookiesFileOk()) args.push('--cookies', COOKIES_FILE);
   else if (config.cookiesFromBrowser) args.push('--cookies-from-browser', config.cookiesFromBrowser);
   return args;
+}
+
+// A damaged cookies.txt would make every download fail, so it's left out (Settings says so)
+function cookiesFileOk() {
+  try {
+    return parseCookiesTxt(fs.readFileSync(COOKIES_FILE, 'utf8')).ok;
+  } catch {
+    return false;
+  }
 }
 
 function killTree(proc) {
@@ -814,6 +823,89 @@ function sendJson(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
+// ---------- login for videos that need it ----------
+// Either a cookies.txt uploaded from the browser (any browser, via an extension) or Firefox's own
+// login. Chrome and Edge encrypt their cookies on Windows in a way yt-dlp can't read, so they
+// aren't offered. The cookies themselves are never sent back to any page.
+
+const LOGIN_BROWSERS = ['firefox'];
+
+function firefoxInstalled() {
+  const roots = [path.join(process.env.APPDATA || '', 'Mozilla', 'Firefox', 'Profiles')];
+  // the Microsoft Store version keeps its profiles elsewhere
+  try {
+    const packages = path.join(process.env.LOCALAPPDATA || '', 'Packages');
+    for (const p of fs.readdirSync(packages)) {
+      if (p.startsWith('Mozilla.Firefox')) roots.push(path.join(packages, p, 'LocalCache', 'Roaming', 'Mozilla', 'Firefox', 'Profiles'));
+    }
+  } catch { /* no Packages folder */ }
+  for (const root of roots) {
+    try {
+      if (fs.readdirSync(root).some((p) => fs.existsSync(path.join(root, p, 'cookies.sqlite')))) return true;
+    } catch { /* not there */ }
+  }
+  return false;
+}
+
+function loginStatus() {
+  let file = null;
+  if (fs.existsSync(COOKIES_FILE)) {
+    const info = parseCookiesTxt(fs.readFileSync(COOKIES_FILE, 'utf8'));
+    file = { ...info, date: fs.statSync(COOKIES_FILE).mtimeMs };
+  }
+  const browser = config.cookiesFromBrowser || null;
+  return {
+    // the file wins when both are set; a damaged file isn't used at all
+    active: file?.ok ? 'file' : browser ? 'browser' : null,
+    file,
+    browser,
+    firefox: firefoxInstalled(),
+  };
+}
+
+// Changes data/config.json and the running settings together
+function saveConfig(patch) {
+  const file = path.join(DATA, 'config.json');
+  const current = readJson(file);
+  const next = { ...current, ...patch };
+  for (const [k, v] of Object.entries(patch)) if (v === '' || v == null) delete next[k];
+  fs.writeFileSync(file + '.tmp', JSON.stringify(next, null, 2));
+  fs.renameSync(file + '.tmp', file);
+  Object.assign(config, patch);
+}
+
+// Asks yt-dlp to load the current login, using a harmless page instead of a video site
+function testLogin() {
+  return new Promise((resolve) => {
+    const args = [...commonArgs(), '--simulate', '--no-playlist', '--', 'https://example.com/'];
+    execFile(YTDLP, args, { windowsHide: true, timeout: 60000 }, (err, stdout, stderr) => {
+      const out = `${stdout}\n${stderr}`;
+      const extracted = /Extracted (\d+) cookies/.exec(out);
+      // only problems with the login count; the page itself has no video, so other errors are expected
+      const problem = out.split(/\r?\n/)
+        .filter((l) => l.startsWith('ERROR:') && /cookie|DPAPI|decrypt|database|keyring/i.test(l)).pop();
+      if (problem) return resolve({ ok: false, detail: problem.replace(/^ERROR:\s*/, '') });
+      if (err?.killed) return resolve({ ok: false, detail: 'timed out' });
+      resolve({ ok: true, count: extracted ? Number(extracted[1]) : null });
+    });
+  });
+}
+
+function readText(req, limit = 2 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.setEncoding('utf8');
+    req.on('data', (c) => {
+      data += c;
+      if (data.length > limit) {
+        reject(Object.assign(new Error('too large'), { code: 'cookiesTooLarge' }));
+        req.destroy();
+      }
+    });
+    req.on('end', () => resolve(data));
+  });
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = '';
@@ -912,8 +1004,53 @@ const server = http.createServer(async (req, res) => {
         port: config.port,
         repo: `https://github.com/${config.repo}`,
         lan: lanAddresses().map((ip) => `http://${ip}:${config.port}`),
-        cookies: fs.existsSync(COOKIES_FILE) ? 'file' : config.cookiesFromBrowser || null,
+        cookies: cookiesFileOk() ? 'file' : config.cookiesFromBrowser || null,
       });
+    }
+
+    if (pathname === '/api/login' && req.method === 'GET') return sendJson(res, 200, loginStatus());
+
+    if (pathname === '/api/login/file') {
+      if (req.method === 'PUT') {
+        let text;
+        try {
+          text = await readText(req);
+        } catch (e) {
+          return sendJson(res, 413, fail(e.code || 'cookiesTooLarge', e.message));
+        }
+        const info = parseCookiesTxt(text);
+        if (!info.ok) {
+          return sendJson(res, 400, fail(info.reason === 'empty' ? 'cookiesEmpty' : 'cookiesFormat', 'Not a cookies.txt file.'));
+        }
+        fs.writeFileSync(COOKIES_FILE + '.tmp', text);
+        fs.renameSync(COOKIES_FILE + '.tmp', COOKIES_FILE);
+        log(`cookies.txt added (${info.count} cookies, ${info.sites} sites${info.youtube ? ', YouTube included' : ''})`);
+        return sendJson(res, 200, loginStatus());
+      }
+      if (req.method === 'DELETE') {
+        fs.rmSync(COOKIES_FILE, { force: true });
+        log('cookies.txt removed');
+        return sendJson(res, 200, loginStatus());
+      }
+    }
+
+    if (pathname === '/api/login/browser' && req.method === 'PUT') {
+      const { browser } = await readBody(req);
+      const value = browser ? String(browser) : '';
+      if (value && (!LOGIN_BROWSERS.includes(value) || (value === 'firefox' && !firefoxInstalled()))) {
+        return sendJson(res, 400, fail('browserUnavailable', 'That browser can\'t be used here.'));
+      }
+      saveConfig({ cookiesFromBrowser: value });
+      log(value ? `using the ${value} login` : 'browser login turned off');
+      return sendJson(res, 200, loginStatus());
+    }
+
+    if (pathname === '/api/login/test' && req.method === 'POST') {
+      const status = loginStatus();
+      if (!status.active) return sendJson(res, 400, fail('loginNone', 'No login is set.'));
+      const result = await testLogin();
+      if (!result.ok) log(`login test failed: ${result.detail}`);
+      return sendJson(res, 200, { ...result, active: status.active });
     }
 
     if (pathname === '/api/update') {

@@ -496,6 +496,19 @@ a.h-title:hover { text-decoration: underline; }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .sheet-head h2 { margin: 0; font-size: 19px; }
 
+/* ---------- login settings ---------- */
+.login-box { display: grid; gap: 10px; }
+.login-box p { margin: 0; }
+.login-status { font-size: 14px; font-weight: 600; color: var(--muted); }
+.login-status.on { color: var(--text); }
+.login-status small { display: block; margin-top: 2px; font-weight: 400; font-size: 12px; color: var(--muted); }
+.login-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.login-actions .hist-btn { margin: 0; }
+.login-result { font-size: 13px; overflow-wrap: anywhere; }
+.login-result.ok { color: var(--blue); }
+.login-result.bad { color: var(--danger); }
+.login-help { line-height: 1.5; }
+
 /* ---------- history window ---------- */
 .sheet-wide { width: min(1040px, calc(100vw - 32px)); }
 .sheet-wide .sheet-inner { display: flex; flex-direction: column; max-height: calc(100dvh - 34px); }
