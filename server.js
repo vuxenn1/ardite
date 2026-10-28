@@ -17,6 +17,7 @@ const DATA = path.join(ROOT, 'data');
 const BIN = path.join(ROOT, 'bin');
 const EXE = process.platform === 'win32' ? '.exe' : '';
 const YTDLP = path.join(BIN, 'yt-dlp' + EXE);
+const FFPROBE = path.join(BIN, 'ffprobe' + EXE);
 const WORK = path.join(os.tmpdir(), 'ardite-jobs');
 const LOG_FILE = path.join(DATA, 'ardite.log');
 
@@ -309,6 +310,7 @@ function publicJob(job) {
     id: job.id,
     url: job.url,
     mode: job.opts.mode,
+    trim: job.opts.trim || null,
     status: job.status,
     phase: job.phase,
     progress: job.progress,
@@ -330,18 +332,49 @@ function expectedHeight(opts, stats) {
   return h > 0 && Number.isFinite(h) ? h : null;
 }
 
-const CODEC_NAMES = [[/^av01/i, 'AV1'], [/^vp0?9/i, 'VP9'], [/^(avc|h264)/i, 'H.264'], [/^(hev|hvc|h265)/i, 'H.265'], [/^vp0?8/i, 'VP8']];
+const CODEC_NAMES = [[/^av0?1/i, 'AV1'], [/^vp0?9/i, 'VP9'], [/^(avc|h264)/i, 'H.264'], [/^(hev|hvc|h265)/i, 'H.265'], [/^vp0?8/i, 'VP8']];
+const codecName = (c) => CODEC_NAMES.find(([re]) => re.test(c))?.[1] || String(c).split('.')[0].toUpperCase();
+
+// Reads the quality from the finished file itself. More reliable than what yt-dlp
+// reports, e.g. after an exact trim the video is re-encoded to H.264.
+function probeMedia(file) {
+  return new Promise((resolve) => {
+    const args = ['-v', 'error', '-select_streams', 'v:0', '-show_entries',
+      'stream=codec_name,width,height,avg_frame_rate,color_transfer', '-of', 'json', file];
+    execFile(FFPROBE, args, { windowsHide: true, timeout: 20000 }, (err, out) => {
+      if (err) return resolve(null);
+      try {
+        const s = JSON.parse(out).streams?.[0];
+        if (!s || /^(mjpeg|png|bmp)$/.test(s.codec_name)) return resolve(null);
+        const [n, d] = String(s.avg_frame_rate || '0/1').split('/').map(Number);
+        const hdr = s.color_transfer === 'smpte2084' ? 'HDR10' : s.color_transfer === 'arib-std-b67' ? 'HLG' : null;
+        resolve({
+          height: shortSide(s.width, s.height) || null,
+          fps: d ? Math.round(n / d) || null : null,
+          codec: codecName(s.codec_name),
+          hdr,
+        });
+      } catch {
+        resolve(null);
+      }
+    });
+  });
+}
 
 // Line printed by yt-dlp once the final file is in place: what was actually downloaded
 function parseDone(job, line) {
-  const [, width, height, fps, vcodec, , range] = line.split('|');
+  const parts = line.split('|');
+  const [, width, height, fps, vcodec, , range] = parts;
+  // the title is last because it may itself contain "|"; file names can't hold ":" and the like
+  const title = parts.slice(7).join('|').trim();
+  if (!job.title && title && title !== 'NA') job.title = title.slice(0, 300);
   const num = (v) => (v && v !== 'NA' && v !== 'None' ? Number(v) : null);
   if (!vcodec || vcodec === 'none' || vcodec === 'NA') return;
   const h = shortSide(num(width), num(height));
   job.media = {
     height: h || null,
     fps: num(fps) ? Math.round(num(fps)) : null,
-    codec: CODEC_NAMES.find(([re]) => re.test(vcodec))?.[1] || vcodec.split('.')[0].toUpperCase(),
+    codec: codecName(vcodec),
     hdr: range && range !== 'SDR' && range !== 'NA' && range !== 'None' ? range : null,
   };
 }
@@ -357,7 +390,8 @@ function emit(job, force = false) {
 
 function buildArgs(job, source) {
   const o = job.opts;
-  const name = (job.prefix ? `${job.prefix} - ` : '') + '%(title).150B [%(id)s].%(ext)s';
+  const cut = o.trim ? ` (${fileClock(o.trim.start)}-${o.trim.end == null ? 'end' : fileClock(o.trim.end)})` : '';
+  const name = (job.prefix ? `${job.prefix} - ` : '') + `%(title).150B [%(id)s]${cut}.%(ext)s`;
   const args = [
     ...commonArgs(),
     '--no-playlist',
@@ -368,12 +402,13 @@ function buildArgs(job, source) {
     'download:ARDITE|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|%(info.vcodec)s|%(info.acodec)s',
     // report what was really downloaded; --print would otherwise silence the log lines we read
     '--no-quiet',
-    '--print', 'after_move:ARDITE_DONE|%(width)s|%(height)s|%(fps)s|%(vcodec)s|%(acodec)s|%(dynamic_range)s',
+    '--print', 'after_move:ARDITE_DONE|%(width)s|%(height)s|%(fps)s|%(vcodec)s|%(acodec)s|%(dynamic_range)s|%(title)s',
     '-o', path.join(job.dir, name),
   ];
 
   if (o.mode === 'audio') {
-    args.push('-f', 'ba/b', '-x', '--audio-quality', '0', '--embed-metadata');
+    // Cutting YouTube's WebM (Opus) audio starts ~10 s early; M4A cuts exactly, so prefer it for trims
+    args.push('-f', o.trim ? 'ba[ext=m4a]/ba/b' : 'ba/b', '-x', '--audio-quality', '0', '--embed-metadata');
     if (o.audioFormat !== 'best') args.push('--audio-format', o.audioFormat);
     if (o.audioFormat !== 'wav') args.push('--embed-thumbnail');
   } else {
@@ -390,6 +425,13 @@ function buildArgs(job, source) {
     }
   }
 
+  if (o.trim) {
+    // Only the chosen part is downloaded. Without --force-keyframes-at-cuts the streams are
+    // copied untouched (lossless) and the cut snaps to the nearest keyframe.
+    args.push('--download-sections', `*${o.trim.start}-${o.trim.end ?? 'inf'}`);
+    if (o.trim.precise) args.push('--force-keyframes-at-cuts');
+  }
+
   if (source.infoFile) args.push('--load-info-json', source.infoFile);
   else args.push('--', job.url);
   return args;
@@ -403,7 +445,9 @@ function parseProgress(job, line) {
   const isAudioPart = vcodec === 'none' && acodec !== 'none';
   const isVideoPart = acodec === 'none' && vcodec !== 'none';
   job.status = 'running';
-  job.phase = job.opts.mode === 'audio' || isAudioPart ? 'downloading-audio'
+  // a trimmed part is fetched by ffmpeg, which reports no useful progress
+  job.phase = job.opts.trim ? 'trimming'
+    : job.opts.mode === 'audio' || isAudioPart ? 'downloading-audio'
     : isVideoPart ? 'downloading-video' : 'downloading';
   job.progress = {
     percent: t && d != null ? Math.min(100, (d / t) * 100) : null,
@@ -435,7 +479,7 @@ function parseLog(job, line) {
 
 function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
   job.status = 'running';
-  job.phase = 'starting';
+  job.phase = job.opts.trim ? 'trimming' : 'starting';
   job.media = null;
   emit(job, true);
   fs.mkdirSync(job.dir, { recursive: true });
@@ -503,17 +547,24 @@ function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
     job.file = path.join(job.dir, files[0].f);
     job.fileName = files[0].f;
     job.size = files[0].size;
-    job.title = job.title || path.parse(files[0].f).name.replace(/ \[[^\]]+\]$/, '');
-    job.status = 'done';
-    job.phase = 'ready';
-    job.progress = { ...job.progress, percent: 100 };
-    const m = job.media;
-    const quality = m ? ` ${m.height}p${m.fps || ''} ${m.codec}${m.hdr ? ' ' + m.hdr : ''}` : '';
-    log(`[${job.id}] done: ${job.fileName} (${(job.size / 1048576).toFixed(1)} MB${quality})`);
-    if (m?.height && job.expected && m.height < job.expected) {
-      log(`[${job.id}] lower quality than offered: got ${m.height}p, expected ${job.expected}p`);
-    }
-    finish(job);
+    job.title = job.title || path.parse(files[0].f).name.replace(/ \[[^\]]+\]( \([^)]*\))?$/, '');
+
+    const complete = (probed) => {
+      if (job.status === 'canceled') return finish(job);
+      if (probed) job.media = probed;
+      job.status = 'done';
+      job.phase = 'ready';
+      job.progress = { ...job.progress, percent: 100 };
+      const m = job.media;
+      const quality = m ? ` ${m.height}p${m.fps || ''} ${m.codec}${m.hdr ? ' ' + m.hdr : ''}` : '';
+      log(`[${job.id}] done: ${job.fileName} (${(job.size / 1048576).toFixed(1)} MB${quality})`);
+      if (m?.height && job.expected && m.height < job.expected) {
+        log(`[${job.id}] lower quality than offered: got ${m.height}p, expected ${job.expected}p`);
+      }
+      finish(job);
+    };
+    if (job.opts.mode === 'video' && fs.existsSync(FFPROBE)) probeMedia(job.file).then(complete);
+    else complete(null);
   });
 
   // 'close' also fires after a spawn error, so the job is finished only there
@@ -575,6 +626,7 @@ function finish(job) {
       url: job.url,
       ext: path.extname(job.fileName).slice(1),
       media: job.media || null,
+      trim: job.opts.trim || null,
       size: job.size,
       device: job.device,
     });
@@ -620,7 +672,30 @@ function parseOptions(body) {
     quality: /^\d{3,4}$/.test(String(body.quality)) ? String(body.quality) : 'max',
     codec: body.codec === 'best' ? 'best' : 'h264',
     audioFormat: AUDIO_FORMATS.includes(body.audioFormat) ? body.audioFormat : 'mp3',
+    trim: null,
   };
+}
+
+// { start, end, precise } in seconds; end null means "to the end". undefined = invalid.
+function parseTrim(t) {
+  if (t == null) return null;
+  if (typeof t !== 'object') return undefined;
+  const start = t.start == null || t.start === '' ? 0 : Number(t.start);
+  const end = t.end == null || t.end === '' ? null : Number(t.end);
+  const ok = (n) => Number.isFinite(n) && n >= 0 && n <= 48 * 3600;
+  if (!ok(start) || (end != null && (!ok(end) || end <= start))) return undefined;
+  if (start === 0 && end == null) return null;
+  const round = (n) => Math.round(n * 1000) / 1000;
+  return { start: round(start), end: end == null ? null : round(end), precise: t.precise === true };
+}
+
+// 83 -> "1m23s" for file names (":" isn't allowed in Windows file names)
+function fileClock(sec) {
+  const s = Math.floor(sec);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const pad = (n) => String(n).padStart(2, '0');
+  return h ? `${h}h${pad(m)}m${pad(s % 60)}s` : `${m}m${pad(s % 60)}s`;
 }
 
 function createJob(url, opts, extra = {}) {
@@ -643,7 +718,8 @@ function createJob(url, opts, extra = {}) {
   };
   jobs.set(id, job);
   queue.push(job);
-  if (!job.batch) log(`[${id}] new job: ${opts.mode} ${opts.quality}/${opts.codec}/${opts.audioFormat} ${url}`);
+  const cut = opts.trim ? ` cut ${opts.trim.start}-${opts.trim.end ?? "end"}${opts.trim.precise ? " exact" : ""}` : "";
+  if (!job.batch) log(`[${id}] new job: ${opts.mode} ${opts.quality}/${opts.codec}/${opts.audioFormat}${cut} ${url}`);
   pump();
   return job;
 }
@@ -969,7 +1045,10 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/jobs' && req.method === 'POST') {
       const body = await readBody(req);
       if (!isValidUrl(body.url)) return sendJson(res, 400, fail('invalidUrl', 'Enter a valid link.'));
-      return sendJson(res, 201, publicJob(createJob(body.url, parseOptions(body), { title: body.title, device: deviceOf(req) })));
+      const opts = parseOptions(body);
+      opts.trim = parseTrim(body.trim);
+      if (opts.trim === undefined) return sendJson(res, 400, fail('badTrim', 'Invalid trim times.'));
+      return sendJson(res, 201, publicJob(createJob(body.url, opts, { title: body.title, device: deviceOf(req) })));
     }
 
     if (pathname === '/api/batches' && req.method === 'POST') {

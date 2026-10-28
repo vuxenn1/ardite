@@ -62,6 +62,15 @@ const STRINGS = {
     'q.auto': 'Auto',
     'q.best': 'Best',
     'fmt.original': 'Original',
+    'trim': 'Trim',
+    'trim.start': 'Start',
+    'trim.end': 'End',
+    'trim.endPh': 'end',
+    'trim.precise': 'Exact cut (slower, re-encodes the video)',
+    'trim.hint': 'Write times like 1:23 or 1:02:03. Leave End empty to keep going to the end. Without an exact cut the part can start a second or two early, but the quality stays untouched.',
+    'trim.invalid': 'That time doesn\'t look right. Write it like 1:23.',
+    'trim.order': 'End has to be after Start.',
+    'trim.tooLong': (d) => `The video is only ${d} long.`,
     'hint.auto': 'Auto picks the best MP4 that plays everywhere (up to 1080p on YouTube). For 4K, pick 4K or switch to "Best quality" in {settings}.',
 
     'toast.noClipLink': 'No link on the clipboard.',
@@ -125,6 +134,7 @@ const STRINGS = {
     'phase.finishing': 'Finishing up',
     'phase.retrying': 'Retrying',
     'phase.ready': 'Ready',
+    'phase.trimming': 'Downloading the chosen part',
     'phase.canceled': 'Canceled',
 
     'err.generic': 'Something went wrong.',
@@ -145,6 +155,7 @@ const STRINGS = {
     'err.jobNotFound': 'Download not found.',
     'err.playlistNotFound': 'Playlist not found.',
     'err.badRequest': 'Bad request.',
+    'err.badTrim': 'The trim times aren\'t valid.',
   },
 
   tr: {
@@ -204,6 +215,15 @@ const STRINGS = {
     'q.auto': 'Otomatik',
     'q.best': 'En iyi',
     'fmt.original': 'Orijinal',
+    'trim': 'Kırp',
+    'trim.start': 'Başlangıç',
+    'trim.end': 'Bitiş',
+    'trim.endPh': 'son',
+    'trim.precise': 'Tam kesim (daha yavaş, videoyu yeniden kodlar)',
+    'trim.hint': 'Zamanları 1:23 veya 1:02:03 gibi yaz. Sona kadar almak için Bitiş\'i boş bırak. Tam kesim kapalıyken parça bir iki saniye erken başlayabilir ama kalite hiç bozulmaz.',
+    'trim.invalid': 'Zaman biçimi hatalı. 1:23 gibi yaz.',
+    'trim.order': 'Bitiş, başlangıçtan sonra olmalı.',
+    'trim.tooLong': (d) => `Video sadece ${d} uzunluğunda.`,
     'hint.auto': 'Otomatik, her yerde oynayan en iyi MP4\'ü seçer (YouTube\'da en fazla 1080p). 4K için 4K\'yı seç ya da {settings} bölümünden "En iyi kalite"ye geç.',
 
     'toast.noClipLink': 'Panoda link yok.',
@@ -267,6 +287,7 @@ const STRINGS = {
     'phase.finishing': 'Bitiriliyor',
     'phase.retrying': 'Tekrar deneniyor',
     'phase.ready': 'Hazır',
+    'phase.trimming': 'Seçilen parça indiriliyor',
     'phase.canceled': 'İptal edildi',
 
     'err.generic': 'Bir şeyler ters gitti.',
@@ -287,6 +308,7 @@ const STRINGS = {
     'err.jobNotFound': 'İndirme bulunamadı.',
     'err.playlistNotFound': 'Oynatma listesi bulunamadı.',
     'err.badRequest': 'Geçersiz istek.',
+    'err.badTrim': 'Kırpma zamanları geçersiz.',
   },
 };
 

@@ -69,6 +69,22 @@
             </button>
           </div>
           <div id="opts" class="chips" data-i18n-attr="aria-label:opts.label"></div>
+          <div id="trimBox" class="trim" hidden>
+            <div class="trim-row">
+              <label><span data-i18n="trim.start"></span>
+                <input id="trimStart" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="0:00">
+              </label>
+              <span class="trim-dash">–</span>
+              <label><span data-i18n="trim.end"></span>
+                <input id="trimEnd" inputmode="decimal" autocomplete="off" spellcheck="false">
+              </label>
+            </div>
+            <label class="trim-precise">
+              <input id="trimPrecise" type="checkbox" class="check">
+              <span data-i18n="trim.precise"></span>
+            </label>
+            <p class="hint" data-i18n="trim.hint"></p>
+          </div>
           <p id="optsHint" class="hint" hidden></p>
         </div>
       </section>

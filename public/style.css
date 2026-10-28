@@ -239,6 +239,24 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 }
 .chip:hover { color: var(--text); }
 .chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.chip.with-icon { display: inline-flex; align-items: center; gap: 6px; }
+.chip.with-icon svg { width: 16px; height: 16px; }
+
+/* ---------- trim ---------- */
+.trim { display: grid; gap: 10px; padding: 14px; border-radius: 16px; border: 1.5px solid var(--border); background: var(--surface); }
+.trim[hidden] { display: none; }
+.trim-row { display: flex; align-items: flex-end; gap: 10px; }
+.trim-row label { display: grid; gap: 4px; flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: var(--muted); }
+.trim-row input {
+  width: 100%; height: 40px; padding: 0 12px; border-radius: 10px;
+  border: 1.5px solid var(--border); background: var(--surface-2); color: var(--text);
+  font: inherit; font-size: 15px; font-variant-numeric: tabular-nums;
+}
+.trim-row input:focus { outline: none; border-color: var(--accent); }
+.trim-row input[aria-invalid="true"] { border-color: var(--danger); }
+.trim-dash { padding-bottom: 10px; color: var(--muted); }
+.trim-precise { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
+.trim .hint { margin: 0; }
 
 .hint { margin: -2px 2px 0; font-size: 13px; color: var(--muted); }
 .hint button { color: var(--blue); font-weight: 600; font-size: 13px; }

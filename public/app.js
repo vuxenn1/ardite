@@ -68,6 +68,7 @@ const ICONS = {
   zip: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M11 9h1M11 12h1M11 15h1"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   chevron: '<path d="M6 9l6 6 6-6"/>',
+  cut: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/>',
 };
 
 function img(src) {
@@ -393,7 +394,9 @@ form.addEventListener('submit', async (e) => {
     if (preview.error) return toast(errText(preview.error));
     if (preview.data?.type === 'playlist' && preview.scope === 'playlist') return startBatch();
   }
-  startJob(url);
+  const trim = readTrim(url);
+  if (trim === undefined) return;
+  startJob(url, { trim });
 });
 
 // ---------- options ----------
@@ -412,10 +415,93 @@ function chip(label, pressed, onClick) {
   return h('button', { type: 'button', class: 'chip', 'aria-pressed': String(pressed), onclick: onClick }, label);
 }
 
+// ---------- trim (download only part of a video) ----------
+
+const trimUI = { open: false };
+const trimAllowed = () => !(preview?.data?.type === 'playlist' && preview.scope === 'playlist');
+
+// "83", "1:23", "1:02:03", "1:23.5" -> seconds; '' -> null; anything else -> NaN
+function parseClock(s) {
+  s = String(s || '').trim().replace(',', '.');
+  if (!s) return null;
+  if (!/^\d+(:\d{1,2}){0,2}(\.\d+)?$/.test(s)) return NaN;
+  return s.split(':').map(Number).reduce((acc, p) => acc * 60 + p, 0);
+}
+
+function fmtClock(sec) {
+  return sec ? fmtDuration(sec) : '0:00';
+}
+
+const trimLabel = (trim) => trim && `✂ ${fmtClock(trim.start)}–${trim.end == null ? t('trim.endPh') : fmtClock(trim.end)}`;
+
+function previewVideo(url) {
+  if (preview?.url !== url) return null;
+  return preview.data?.type === 'video' ? preview.data : preview.data?.video || null;
+}
+
+function trimChip() {
+  return h('button', {
+    type: 'button', class: 'chip with-icon', 'aria-pressed': String(trimUI.open), 'aria-controls': 'trimBox',
+    onclick: () => {
+      trimUI.open = !trimUI.open;
+      renderOpts();
+      if (trimUI.open) $('#trimStart').focus();
+    },
+  }, icon('cut'), t('trim'));
+}
+
+function renderTrim() {
+  const box = $('#trimBox');
+  box.hidden = !(trimUI.open && trimAllowed());
+  const duration = preview?.url && previewVideo(preview.url)?.duration;
+  $('#trimEnd').placeholder = duration ? fmtClock(duration) : t('trim.endPh');
+}
+
+// Returns the trim to send: null for the whole video, undefined if the times are wrong
+function readTrim(url) {
+  if (!trimUI.open) return null;
+  const startEl = $('#trimStart');
+  const endEl = $('#trimEnd');
+  const start = parseClock(startEl.value);
+  const end = parseClock(endEl.value);
+  startEl.removeAttribute('aria-invalid');
+  endEl.removeAttribute('aria-invalid');
+  const bad = (el, message) => {
+    el.setAttribute('aria-invalid', 'true');
+    el.focus();
+    toast(message);
+  };
+  if (Number.isNaN(start)) return bad(startEl, t('trim.invalid'));
+  if (Number.isNaN(end)) return bad(endEl, t('trim.invalid'));
+  if (end != null && end <= (start || 0)) return bad(endEl, t('trim.order'));
+  const duration = previewVideo(url)?.duration;
+  if (duration && (start || 0) >= duration) return bad(startEl, t('trim.tooLong', fmtClock(duration)));
+  if (duration && end != null && end > duration + 1) return bad(endEl, t('trim.tooLong', fmtClock(duration)));
+  if (!start && end == null) return null;
+  return { start: start || 0, end, precise: $('#trimPrecise').checked };
+}
+
+// The time boxes sit outside the link form, so Enter there starts the download too
+for (const el of [$('#trimStart'), $('#trimEnd')]) {
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') form.requestSubmit();
+  });
+  el.addEventListener('input', () => el.removeAttribute('aria-invalid'));
+}
+
+function resetTrim() {
+  trimUI.open = false;
+  $('#trimStart').value = '';
+  $('#trimEnd').value = '';
+  $('#trimPrecise').checked = false;
+  renderTrim();
+}
+
 function renderOpts() {
   const box = $('#opts');
   const hint = $('#optsHint');
   hint.hidden = true;
+  renderTrim();
 
   if (settings.mode === 'audio') {
     const formats = [['mp3', 'MP3'], ['m4a', 'M4A'], ['opus', 'OPUS'], ['wav', 'WAV'], ['best', t('fmt.original')]];
@@ -425,6 +511,7 @@ function renderOpts() {
       renderOpts();
       if (preview?.data?.type === 'playlist' && preview.scope === 'playlist') updatePlaylistCounters();
     })));
+    if (trimAllowed()) box.append(trimChip());
     return;
   }
 
@@ -440,6 +527,7 @@ function renderOpts() {
     saveSettings();
     renderOpts();
   })));
+  if (trimAllowed()) box.append(trimChip());
 
   if (settings.codec === 'h264' && selected === 'max') {
     hint.hidden = false;
@@ -457,6 +545,7 @@ const currentOptions = () => ({
 
 function clearInput() {
   input.value = '';
+  resetTrim();
   resetPreview();
   updateInputButtons();
 }
@@ -469,13 +558,14 @@ function persistTasks() {
   store.set('tasks', [...tasks.values()].map((t) => ({ kind: t.kind, id: t.data.id, meta: t.meta, saved: t.saved })));
 }
 
-async function startJob(url) {
-  const v = preview?.url === url ? (preview.data?.type === 'video' ? preview.data : preview.data?.video) : null;
+// extra.trim: { start, end, precise } to download only part of the video
+async function startJob(url, extra = {}) {
+  const v = previewVideo(url);
   const meta = { url, mode: settings.mode, title: v?.title || null, thumbnail: v?.thumbnail || null };
   const goBtn = $('#goBtn');
   goBtn.disabled = true;
   try {
-    const job = await api('/api/jobs', { method: 'POST', body: { url, title: meta.title, ...currentOptions() } });
+    const job = await api('/api/jobs', { method: 'POST', body: { url, title: meta.title, ...currentOptions(), trim: extra.trim || null } });
     addTask('job', job, meta, false);
     clearInput();
   } catch (e) {
@@ -581,11 +671,11 @@ function jobStatusText(d) {
   if (d.status === 'done' && isLowQuality(d)) {
     return t('warn.lowQuality', qualityLabel(String(d.media.height), d.media.fps), qualityLabel(String(d.expected)));
   }
-  if (d.status === 'done') return [t('st.ready'), mediaLabel(d.media), fmtBytes(d.size)].filter(Boolean).join(' · ');
+  if (d.status === 'done') return [t('st.ready'), trimLabel(d.trim), mediaLabel(d.media), fmtBytes(d.size)].filter(Boolean).join(' · ');
   if (d.status === 'error') return errText(d.error, 'st.failed');
   if (d.status === 'canceled') return t('st.canceled');
   const p = d.progress || {};
-  const parts = [phaseText(d.phase)];
+  const parts = [phaseText(d.phase), trimLabel(d.trim)];
   if (d.status === 'running' && p.downloaded != null) {
     parts.push(p.total ? `${fmtBytes(p.downloaded)} / ${fmtBytes(p.total)}` : fmtBytes(p.downloaded));
     if (p.speed) parts.push(fmtBytes(p.speed) + '/s');
@@ -622,7 +712,7 @@ function renderJob(task) {
     }, icon('save'), t('save')));
   }
   if (d.status === 'error' || (d.status === 'done' && isLowQuality(d))) {
-    actions.append(h('button', { type: 'button', class: 'secondary-btn', onclick: () => { removeTask(task); setMode(meta.mode); startJob(meta.url); } }, t('retry')));
+    actions.append(h('button', { type: 'button', class: 'secondary-btn', onclick: () => { removeTask(task); setMode(meta.mode); startJob(meta.url, { trim: d.trim }); } }, t('retry')));
   }
   actions.append(closeButton(task));
 
@@ -734,7 +824,7 @@ function historyAgain(item) {
     loadPreview(item.url);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   } else {
-    startJob(item.url);
+    startJob(item.url, { trim: item.trim });
   }
 }
 
@@ -753,6 +843,7 @@ function renderHistory() {
     const meta = [
       fmtDate.format(item.date),
       item.device && t('device.' + item.device),
+      trimLabel(item.trim),
       item.site,
       isList ? t('files', item.count || 0) : mediaLabel(item.media) || item.ext?.toUpperCase(),
       fmtBytes(item.size),
