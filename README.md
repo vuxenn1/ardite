@@ -28,12 +28,24 @@
 
 ## Installation
 
-Requires Windows 10/11 and [Node.js](https://nodejs.org) 20.15 or newer.
+Requires Windows 10/11. Nothing else to install.
 
-1. Download this repository (**Code > Download ZIP**) and extract it somewhere permanent.
-2. Double-click `install.bat`.
+1. Download **[Ardite-win64.zip](https://github.com/vuxenn1/ardite/releases/latest/download/Ardite-win64.zip)** from the [latest release](https://github.com/vuxenn1/ardite/releases/latest).
+2. Extract it somewhere permanent (for example your Documents folder).
+3. Double-click `install.bat` and click **Yes** when Windows asks for firewall permission.
 
 This downloads yt-dlp and ffmpeg, makes Ardite start in the background with Windows and opens the firewall for your home network.
+
+To update, run `stop.bat`, extract the new release over the old folder and run `install.bat` again. Your settings in the `data` folder are kept.
+
+<details>
+<summary>Running from source</summary>
+
+Requires [Node.js](https://nodejs.org) 20.15 or newer. Download this repository (**Code > Download ZIP**), extract it and double-click `install.bat`.
+
+To publish a release, push a tag like `v1.2.0`. GitHub Actions builds `Ardite-win64.zip` with Node.js included and attaches it to the release.
+
+</details>
 
 ## Usage
 
