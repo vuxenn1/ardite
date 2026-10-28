@@ -496,6 +496,72 @@ a.h-title:hover { text-decoration: underline; }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .sheet-head h2 { margin: 0; font-size: 19px; }
 
+/* ---------- history window ---------- */
+.sheet-wide { width: min(1040px, calc(100vw - 32px)); }
+.sheet-wide .sheet-inner { display: flex; flex-direction: column; max-height: calc(100dvh - 34px); }
+.hist-tools { display: flex; align-items: center; gap: 12px; margin: 6px 0 12px; }
+.hist-tools input {
+  flex: 1; min-width: 0; height: 40px; padding: 0 12px; border-radius: 10px;
+  border: 1.5px solid var(--border); background: var(--surface-2); color: var(--text); font: inherit; font-size: 14px;
+}
+.hist-tools input:focus { outline: none; border-color: var(--accent); }
+.hist-count { flex: none; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hist-wrap { overflow: auto; min-height: 0; margin: 0 -4px; padding: 0 4px; }
+.hist-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.hist-table th {
+  position: sticky; top: 0; z-index: 1; background: var(--surface);
+  text-align: left; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.hist-table td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.hist-table tr:last-child td { border-bottom: 0; }
+.hist-table small { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); }
+.hist-date { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hist-item { min-width: 220px; max-width: 380px; }
+.hist-title { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.hist-title svg { width: 16px; height: 16px; color: var(--muted); }
+.hist-title span { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.hist-item small { padding-left: 24px; }
+.hist-quality, .hist-size, .hist-device { white-space: nowrap; color: var(--muted); }
+.hist-quality { color: var(--text); }
+.hist-actions { white-space: nowrap; text-align: right; }
+.hist-btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; margin-left: 4px;
+  border-radius: 9px; border: 1.5px solid var(--border); background: var(--surface); color: var(--text);
+  font-size: 13px; font-weight: 600;
+}
+.hist-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.hist-btn:disabled { opacity: .4; cursor: default; }
+.hist-btn svg { width: 15px; height: 15px; }
+.hist-actions .h-remove { vertical-align: middle; margin-left: 2px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* phones: each download becomes a small card instead of a wide table row */
+@media (max-width: 720px) {
+  .hist-table thead { display: none; }
+  .hist-table, .hist-table tbody { display: block; }
+  /* title, then date, then "quality · size · device", then the buttons on their own line */
+  .hist-table tr {
+    display: grid; gap: 4px 12px; align-items: center;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    grid-template-areas: "item item item" "date date date" "qual size dev" "act act act";
+    padding: 12px 0; border-bottom: 1px solid var(--border);
+  }
+  .hist-table td { padding: 0; border: 0; font-size: 13px; min-width: 0; }
+  .hist-item { grid-area: item; max-width: none; min-width: 0; font-size: 14px; }
+  .hist-title span { overflow-wrap: anywhere; }
+  .hist-date { grid-area: date; display: flex; gap: 6px; color: var(--muted); }
+  .hist-date small { margin: 0; font-size: 13px; }
+  .hist-quality { grid-area: qual; }
+  .hist-size { grid-area: size; }
+  .hist-device { grid-area: dev; overflow: hidden; text-overflow: ellipsis; }
+  .hist-actions { grid-area: act; display: flex; align-items: center; gap: 6px; text-align: left; margin-top: 6px; }
+  .hist-btn { margin: 0; }
+  .hist-actions .h-remove { margin-left: auto; }
+  .hist-tools { flex-wrap: wrap; }
+  .hist-tools input { flex-basis: 100%; }
+}
+
 @media (max-width: 560px) {
   .sheet { width: 100vw; max-width: 100vw; margin: auto 0 0; border-radius: 22px 22px 0 0; border-bottom: 0; padding-bottom: env(safe-area-inset-bottom); }
 }
