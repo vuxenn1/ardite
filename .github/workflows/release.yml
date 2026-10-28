@@ -1,0 +1,65 @@
+# Builds a ready-to-use Windows package (Node.js included) and publishes it as a GitHub Release.
+# - Push a tag like v1.0.0  -> creates the release with Ardite-win64.zip
+# - Run it by hand (Actions tab > Release > Run workflow) -> test build, downloadable from the run page
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      NODE_LINE: latest-v24.x # Node.js LTS line bundled into the package
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download portable Node.js
+        run: |
+          base="https://nodejs.org/dist/$NODE_LINE"
+          curl -fsSL "$base/SHASUMS256.txt" -o SHASUMS256.txt
+          file=$(grep -oE 'node-v[0-9.]+-win-x64\.zip' SHASUMS256.txt | head -1)
+          echo "Using $file"
+          curl -fsSL "$base/$file" -o "$file"
+          grep " $file\$" SHASUMS256.txt | sha256sum -c -
+          unzip -q "$file" '*/node.exe' -d node-dist
+
+      - name: Build package
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then version="${GITHUB_REF_NAME#v}"; else version="0.0.0-dev"; fi
+          out=dist/Ardite
+          mkdir -p "$out/runtime"
+          cp -r public scripts server.js setup.js zip.js package.json LICENSE README.md ./*.bat "$out/"
+          cp node-dist/*/node.exe "$out/runtime/"
+          sed -i -E "s/\"version\": \"[^\"]+\"/\"version\": \"$version\"/" "$out/package.json"
+          (cd dist && zip -qr Ardite-win64.zip Ardite)
+          ls -lh dist
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'EOF'
+          ## Installation
+
+          1. Download **Ardite-win64.zip** below and extract it somewhere permanent (for example your Documents folder).
+          2. Double-click `install.bat` and click **Yes** when Windows asks for firewall permission.
+
+          No Node.js installation needed, it's included. yt-dlp and ffmpeg are downloaded during setup.
+
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/Ardite-win64.zip \
+            --title "Ardite $GITHUB_REF_NAME" --notes-file notes.md --generate-notes
+
+      - name: Upload test build
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ardite-win64
+          path: dist/Ardite
