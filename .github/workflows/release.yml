@@ -34,7 +34,7 @@ jobs:
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then version="${GITHUB_REF_NAME#v}"; else version="0.0.0-dev"; fi
           out=dist/Ardite
           mkdir -p "$out/runtime"
-          cp -r public scripts server.js setup.js zip.js package.json LICENSE README.md ./*.bat "$out/"
+          cp -r public scripts ./*.js package.json LICENSE README.md ./*.bat "$out/"
           cp node-dist/*/node.exe "$out/runtime/"
           sed -i -E "s/\"version\": \"[^\"]+\"/\"version\": \"$version\"/" "$out/package.json"
           (cd dist && zip -qr Ardite-win64.zip Ardite)

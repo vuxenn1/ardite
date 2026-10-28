@@ -29,6 +29,10 @@ const settings = {
   codec: isTouch ? 'h264' : 'best',
   audioFormat: 'mp3',
   autoSave: true,
+  // remembered subtitle choices; subtitles themselves are off until turned on for a download
+  subLangs: [...new Set([lang, 'en'])],
+  subAuto: false,
+  subSrt: false,
   theme: 'auto',
   lang: 'auto',
   ...store.get('settings', {}),
@@ -68,6 +72,7 @@ const ICONS = {
   zip: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M11 9h1M11 12h1M11 15h1"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   chevron: '<path d="M6 9l6 6 6-6"/>',
+  cc: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10.5 10.2a2.3 2.3 0 1 0 0 3.6M17 10.2a2.3 2.3 0 1 0 0 3.6"/>',
   cut: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/>',
 };
 
@@ -396,7 +401,9 @@ form.addEventListener('submit', async (e) => {
   }
   const trim = readTrim(url);
   if (trim === undefined) return;
-  startJob(url, { trim });
+  const subs = readSubs(url);
+  if (subs === undefined) return;
+  startJob(url, { trim, subs });
 });
 
 // ---------- options ----------
@@ -497,11 +504,174 @@ function resetTrim() {
   renderTrim();
 }
 
+// ---------- subtitles ----------
+
+const subsUI = { open: false, shown: new Set() };
+
+// Language names in the viewer's language: "Türkçe", "İngilizce (otomatik)"
+function langName(code, fallback) {
+  const base = code.replace(/-orig$/, '');
+  let name = fallback || base;
+  try {
+    name = new Intl.DisplayNames([lang], { type: 'language' }).of(base) || name;
+  } catch { /* keep the fallback */ }
+  name = name.charAt(0).toLocaleUpperCase(lang) + name.slice(1);
+  return /-orig$/.test(code) ? `${name} (${t('subs.autoShort')})` : name;
+}
+
+const baseOf = (code) => code.replace(/-orig$/, '').split('-')[0].toLowerCase();
+
+// Languages offered to pick from when the video's own list isn't known (playlists)
+const COMMON_LANGS = ['tr', 'en', 'de', 'fr', 'es', 'it', 'pt', 'ru', 'ar', 'ja', 'ko', 'zh', 'nl', 'pl', 'az', 'fa', 'hi', 'id', 'uk', 'el', 'sv'];
+
+// The current single video's subtitles from the preview, or null (playlist or no preview yet)
+function previewSubs() {
+  if (!preview?.data || !trimAllowed()) return null;
+  return previewVideo(preview.url)?.subs || null;
+}
+
+// The video's subtitle codes for the remembered languages, in the order they were picked.
+// A remembered language matches any of its variants (en -> en-US).
+function pickedCodes(list) {
+  const codes = [];
+  for (const pref of settings.subLangs) {
+    const hit = list.find((s) => s.code === pref) || list.find((s) => baseOf(s.code) === baseOf(pref));
+    if (hit && !codes.includes(hit.code)) codes.push(hit.code);
+  }
+  return codes;
+}
+
+// Rows to show: { code, name, checked }, picked languages first in their order
+function subsRows() {
+  const subs = previewSubs();
+  if (subs) {
+    const picked = pickedCodes(subs.list);
+    for (const c of picked) subsUI.shown.add(c);
+    const rank = (c) => (picked.includes(c) ? picked.indexOf(c) : picked.length);
+    return subs.list.filter((s) => subsUI.shown.has(s.code))
+      .sort((a, b) => rank(a.code) - rank(b.code))
+      .map((s) => ({ code: s.code, name: langName(s.code, s.name), checked: picked.includes(s.code) }));
+  }
+  for (const c of settings.subLangs) subsUI.shown.add(c);
+  return [...subsUI.shown].map((code) => ({ code, name: langName(code), checked: settings.subLangs.includes(code) }));
+}
+
+function toggleSubLang(code, on) {
+  const others = settings.subLangs.filter((c) => c !== code && c !== baseOf(code) && baseOf(c) !== baseOf(code));
+  settings.subLangs = on ? [...others, code] : others;
+  saveSettings();
+}
+
+function subsChip() {
+  return h('button', {
+    type: 'button', class: 'chip with-icon', 'aria-pressed': String(subsUI.open), 'aria-controls': 'subsBox',
+    onclick: () => {
+      subsUI.open = !subsUI.open;
+      renderOpts();
+    },
+  }, icon('cc'), t('subs'));
+}
+
+function renderSubs() {
+  const box = $('#subsBox');
+  box.hidden = !(subsUI.open && settings.mode === 'video');
+  if (box.hidden) return;
+
+  const subs = previewSubs();
+  const parts = [];
+  if (subs && !subs.list.length && !subs.auto) {
+    parts.push(h('p', { class: 'hint' }, t('subs.noneHere')));
+  } else {
+    const rows = subsRows();
+    const list = h('div', { class: 'subs-langs' }, rows.map((r) => h('label', { class: 'trim-precise' },
+      h('input', {
+        type: 'checkbox', class: 'check', checked: r.checked,
+        onchange: (e) => { toggleSubLang(r.code, e.target.checked); },
+      }),
+      h('span', {}, r.name))));
+    parts.push(list);
+
+    // other languages go into a drop-down so long lists stay short
+    const more = (subs ? subs.list.map((s) => s.code) : COMMON_LANGS).filter((c) => !rows.some((r) => r.code === c));
+    if (more.length) {
+      parts.push(h('select', {
+        class: 'subs-add', 'aria-label': t('subs.add'),
+        onchange: (e) => {
+          const code = e.target.value;
+          if (!code) return;
+          subsUI.shown.add(code);
+          toggleSubLang(code, true);
+          renderSubs();
+        },
+      }, h('option', { value: '' }, '+ ' + t('subs.add')),
+      more.map((c) => ({ c, name: langName(c, subs?.list.find((s) => s.code === c)?.name) }))
+        .sort((a, b) => a.name.localeCompare(b.name, lang))
+        .map(({ c, name }) => h('option', { value: c }, name))));
+    }
+
+    // YouTube's automatic subtitle in the video's own language
+    if (!subs || subs.auto) {
+      parts.push(h('label', { class: 'trim-precise' },
+        h('input', {
+          type: 'checkbox', class: 'check', checked: settings.subAuto,
+          onchange: (e) => { settings.subAuto = e.target.checked; saveSettings(); },
+        }),
+        h('span', {}, subs?.auto ? t('subs.autoOne', langName(subs.auto.code.replace(/-orig$/, ''))) : t('subs.autoAny'))));
+    }
+  }
+
+  parts.push(h('label', { class: 'trim-precise' },
+    h('input', {
+      type: 'checkbox', class: 'check', checked: settings.subSrt,
+      onchange: (e) => { settings.subSrt = e.target.checked; saveSettings(); },
+    }),
+    h('span', {}, t('subs.srt'))));
+  parts.push(h('p', { class: 'hint' }, t('subs.hint')));
+  box.replaceChildren(...parts);
+}
+
+// What to send: null when off, undefined (after a message) when nothing usable is chosen
+function readSubs(url) {
+  if (!subsUI.open || settings.mode !== 'video') return null;
+  const subs = url ? previewVideo(url)?.subs : previewSubs();
+  let langs = settings.subLangs;
+  let auto = settings.subAuto;
+  if (subs) {
+    langs = pickedCodes(subs.list);
+    auto = auto && !!subs.auto;
+    if (!subs.list.length && !subs.auto) {
+      toast(t('subs.noneHere'));
+      return undefined;
+    }
+  }
+  if (!langs.length && !auto) {
+    toast(t('subs.pickOne'));
+    return undefined;
+  }
+  return { langs, auto, srt: settings.subSrt };
+}
+
+function resetSubs() {
+  subsUI.open = false;
+  subsUI.shown.clear();
+  renderSubs();
+}
+
+// "Altyazı: TR, EN (oto)" on a finished download
+function subsLabel(s) {
+  if (!s) return '';
+  if (s.failed) return t('subs.failed');
+  if (!s.langs?.length) return t('subs.missing');
+  const short = (c) => c.replace(/-orig$/, '').toUpperCase() + (/-orig$/.test(c) ? ` (${t('subs.autoShort')})` : '');
+  return `${t('subs')}: ${s.langs.map(short).join(', ')}`;
+}
+
 function renderOpts() {
   const box = $('#opts');
   const hint = $('#optsHint');
   hint.hidden = true;
   renderTrim();
+  renderSubs();
 
   if (settings.mode === 'audio') {
     const formats = [['mp3', 'MP3'], ['m4a', 'M4A'], ['opus', 'OPUS'], ['wav', 'WAV'], ['best', t('fmt.original')]];
@@ -528,6 +698,7 @@ function renderOpts() {
     renderOpts();
   })));
   if (trimAllowed()) box.append(trimChip());
+  box.append(subsChip());
 
   if (settings.codec === 'h264' && selected === 'max') {
     hint.hidden = false;
@@ -546,6 +717,7 @@ const currentOptions = () => ({
 function clearInput() {
   input.value = '';
   resetTrim();
+  resetSubs();
   resetPreview();
   updateInputButtons();
 }
@@ -559,13 +731,15 @@ function persistTasks() {
 }
 
 // extra.trim: { start, end, precise } to download only part of the video
+// extra.subs: { langs, auto, srt } to add subtitles
 async function startJob(url, extra = {}) {
   const v = previewVideo(url);
-  const meta = { url, mode: settings.mode, title: v?.title || null, thumbnail: v?.thumbnail || null };
+  const meta = { url, mode: settings.mode, title: v?.title || null, thumbnail: v?.thumbnail || null, subs: extra.subs || null };
   const goBtn = $('#goBtn');
   goBtn.disabled = true;
   try {
-    const job = await api('/api/jobs', { method: 'POST', body: { url, title: meta.title, ...currentOptions(), trim: extra.trim || null } });
+    const body = { url, title: meta.title, ...currentOptions(), trim: extra.trim || null, subs: extra.subs || null };
+    const job = await api('/api/jobs', { method: 'POST', body });
     addTask('job', job, meta, false);
     clearInput();
   } catch (e) {
@@ -581,9 +755,11 @@ async function startBatch() {
   const entries = d.entries.filter((e) => preview.selected.has(e.index) && !e.unavailable)
     .map((e) => ({ index: e.index, url: e.url, title: e.title }));
   if (!entries.length) return toast(t('toast.selectOne'));
+  const subs = readSubs(null);
+  if (subs === undefined) return;
   const meta = { url: preview.url, mode: settings.mode, title: d.title, thumbnail: d.thumbnail };
   try {
-    const batch = await api('/api/batches', { method: 'POST', body: { url: preview.url, title: d.title, entries, ...currentOptions() } });
+    const batch = await api('/api/batches', { method: 'POST', body: { url: preview.url, title: d.title, entries, ...currentOptions(), subs } });
     addTask('batch', batch, meta, false);
     clearInput();
   } catch (e) {
@@ -645,6 +821,15 @@ function saveTask(task) {
   task.saved = true;
   persistTasks();
   download(`/api/jobs/${task.data.id}/file`);
+  saveSrt(task.data);
+}
+
+// .srt files asked for next to the video; spaced out so the browser accepts them all
+async function saveSrt(d) {
+  for (const s of d.subs?.srt || []) {
+    await new Promise((r) => setTimeout(r, 800));
+    download(`/api/jobs/${d.id}/subs/${s.i}`);
+  }
 }
 
 function removeTask(task) {
@@ -671,7 +856,7 @@ function jobStatusText(d) {
   if (d.status === 'done' && isLowQuality(d)) {
     return t('warn.lowQuality', qualityLabel(String(d.media.height), d.media.fps), qualityLabel(String(d.expected)));
   }
-  if (d.status === 'done') return [t('st.ready'), trimLabel(d.trim), mediaLabel(d.media), fmtBytes(d.size)].filter(Boolean).join(' · ');
+  if (d.status === 'done') return [t('st.ready'), trimLabel(d.trim), mediaLabel(d.media), subsLabel(d.subs), fmtBytes(d.size)].filter(Boolean).join(' · ');
   if (d.status === 'error') return errText(d.error, 'st.failed');
   if (d.status === 'canceled') return t('st.canceled');
   const p = d.progress || {};
@@ -710,9 +895,12 @@ function renderJob(task) {
       class: 'primary-btn', href: `/api/jobs/${d.id}/file`, download: '',
       onclick: () => { task.saved = true; persistTasks(); },
     }, icon('save'), t('save')));
+    if (d.subs?.srt?.length) {
+      actions.append(h('button', { type: 'button', class: 'secondary-btn', title: t('subs.saveSrt'), onclick: () => saveSrt(d) }, 'SRT'));
+    }
   }
   if (d.status === 'error' || (d.status === 'done' && isLowQuality(d))) {
-    actions.append(h('button', { type: 'button', class: 'secondary-btn', onclick: () => { removeTask(task); setMode(meta.mode); startJob(meta.url, { trim: d.trim }); } }, t('retry')));
+    actions.append(h('button', { type: 'button', class: 'secondary-btn', onclick: () => { removeTask(task); setMode(meta.mode); startJob(meta.url, { trim: d.trim, subs: meta.subs }); } }, t('retry')));
   }
   actions.append(closeButton(task));
 
@@ -824,7 +1012,10 @@ function historyAgain(item) {
     loadPreview(item.url);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   } else {
-    startJob(item.url, { trim: item.trim });
+    const subs = item.subs?.length
+      ? { langs: item.subs.filter((c) => !/-orig$/.test(c)), auto: item.subs.some((c) => /-orig$/.test(c)), srt: settings.subSrt }
+      : null;
+    startJob(item.url, { trim: item.trim, subs });
   }
 }
 
@@ -844,6 +1035,7 @@ function renderHistory() {
       fmtDate.format(item.date),
       item.device && t('device.' + item.device),
       trimLabel(item.trim),
+      item.subs && subsLabel({ langs: item.subs }),
       item.site,
       isList ? t('files', item.count || 0) : mediaLabel(item.media) || item.ext?.toUpperCase(),
       fmtBytes(item.size),

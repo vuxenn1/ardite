@@ -10,6 +10,7 @@ import { spawn, execFile } from 'node:child_process';
 import { pipeline } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { createZip, fileCrc32 } from './zip.js';
+import { summarizeSubs, parseSubsOption, subtitleArgs, findSubFiles, shiftSrt, embedSubs } from './subs.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -18,6 +19,7 @@ const BIN = path.join(ROOT, 'bin');
 const EXE = process.platform === 'win32' ? '.exe' : '';
 const YTDLP = path.join(BIN, 'yt-dlp' + EXE);
 const FFPROBE = path.join(BIN, 'ffprobe' + EXE);
+const FFMPEG = path.join(BIN, 'ffmpeg' + EXE);
 const WORK = path.join(os.tmpdir(), 'ardite-jobs');
 const LOG_FILE = path.join(DATA, 'ardite.log');
 
@@ -198,6 +200,7 @@ function summarizeVideo(info) {
     site: info.extractor_key || info.extractor || null,
     heights: [...heights].filter((h) => h >= 144).sort((a, b) => b - a),
     hasVideo,
+    subs: summarizeSubs(info),
   };
 }
 
@@ -319,6 +322,11 @@ function publicJob(job) {
     size: job.size,
     media: job.media || null,
     expected: job.expected || null,
+    subs: job.opts.subs ? {
+      langs: job.subs?.langs || [],
+      srt: (job.subs?.files || []).map((f, i) => ({ i, lang: f.lang })),
+      failed: !!job.skipSubs,
+    } : null,
     error: job.error,
   };
 }
@@ -423,6 +431,8 @@ function buildArgs(job, source) {
       // AV1 4K60 stutters on GPUs without AV1 decoding, and HDR looks washed out on normal screens.
       args.push('-S', [res || 'res', 'fps', 'vcodec:vp9', 'acodec:aac'].join(','), '--merge-output-format', 'mp4');
     }
+    // Downloaded as .srt files; they're embedded (and shifted for trims) after the download
+    if (o.subs && !job.skipSubs) args.push(...subtitleArgs(o.subs));
   }
 
   if (o.trim) {
@@ -525,6 +535,14 @@ function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
       return setTimeout(() => (job.status === 'canceled' ? finish(job) : runJob(job, {})), 3000 * job.attempts);
     }
 
+    // YouTube sometimes refuses subtitle requests (e.g. HTTP 429); get the video without them
+    if (code !== 0 && job.opts.subs && !job.skipSubs && /subtitle/i.test(lastError(stderr))) {
+      log(`[${job.id}] subtitles failed, retrying without them: ${lastError(stderr)}`);
+      job.skipSubs = true;
+      fs.rmSync(job.dir, { recursive: true, force: true });
+      return runJob(job, {});
+    }
+
     if (code !== 0) {
       job.status = 'error';
       job.error = friendlyError(lastError(stderr));
@@ -534,7 +552,7 @@ function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
     }
 
     const files = fs.readdirSync(job.dir)
-      .filter((f) => !/\.(part|ytdl|temp|json|webp|jpg|png)$/i.test(f) && !f.includes('.part-Frag'))
+      .filter((f) => !/\.(part|ytdl|temp|json|webp|jpg|png|srt|vtt)$/i.test(f) && !f.includes('.part-Frag'))
       .map((f) => ({ f, size: fs.statSync(path.join(job.dir, f)).size }))
       .sort((a, b) => b.size - a.size);
 
@@ -563,12 +581,51 @@ function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
       }
       finish(job);
     };
-    if (job.opts.mode === 'video' && fs.existsSync(FFPROBE)) probeMedia(job.file).then(complete);
-    else complete(null);
+    const probe = () => (job.opts.mode === 'video' && fs.existsSync(FFPROBE) ? probeMedia(job.file) : Promise.resolve(null));
+    if (job.opts.subs && !job.skipSubs) {
+      addSubtitles(job)
+        .catch((e) => log(`[${job.id}] could not add subtitles: ${e.message}`))
+        .then(probe)
+        .then(complete);
+    } else {
+      probe().then(complete);
+    }
   });
 
   // 'close' also fires after a spawn error, so the job is finished only there
   proc.on('error', (e) => (stderr += e.message));
+}
+
+// Shifts the subtitles of a trimmed part, embeds them into the MP4 and keeps
+// the .srt files only if they were asked for as well
+async function addSubtitles(job) {
+  // in the order the languages were picked (the first one shows by default), automatic ones last
+  const order = job.opts.subs.langs;
+  const rank = (lang) => {
+    if (/-orig$/.test(lang)) return order.length;
+    const i = order.findIndex((c) => c === lang || c.split('-')[0] === lang.split('-')[0]);
+    return i < 0 ? order.length - 0.5 : i;
+  };
+  const files = findSubFiles(job.dir, job.file).sort((a, b) => rank(a.lang) - rank(b.lang));
+  job.subs = { langs: files.map((f) => f.lang), files: [] };
+  if (!files.length) return;
+
+  const trim = job.opts.trim;
+  if (trim) {
+    for (const f of files) fs.writeFileSync(f.path, shiftSrt(fs.readFileSync(f.path, 'utf8'), trim.start, trim.end));
+  }
+
+  if (/\.mp4$/i.test(job.file) && fs.existsSync(FFMPEG)) {
+    job.status = 'processing';
+    job.phase = 'subtitles';
+    emit(job, true);
+    await embedSubs(FFMPEG, job.file, files, (proc) => (job.proc = proc));
+    job.proc = null;
+    job.size = fs.statSync(job.file).size;
+  }
+
+  if (job.opts.subs.srt) job.subs.files = files;
+  else for (const f of files) fs.rmSync(f.path, { force: true });
 }
 
 // ---------- download history ----------
@@ -627,6 +684,7 @@ function finish(job) {
       ext: path.extname(job.fileName).slice(1),
       media: job.media || null,
       trim: job.opts.trim || null,
+      subs: job.subs?.langs?.length ? job.subs.langs : null,
       size: job.size,
       device: job.device,
     });
@@ -673,6 +731,8 @@ function parseOptions(body) {
     codec: body.codec === 'best' ? 'best' : 'h264',
     audioFormat: AUDIO_FORMATS.includes(body.audioFormat) ? body.audioFormat : 'mp3',
     trim: null,
+    // subtitles only make sense for videos
+    subs: body.mode === 'audio' ? null : parseSubsOption(body.subs),
   };
 }
 
@@ -718,8 +778,9 @@ function createJob(url, opts, extra = {}) {
   };
   jobs.set(id, job);
   queue.push(job);
-  const cut = opts.trim ? ` cut ${opts.trim.start}-${opts.trim.end ?? "end"}${opts.trim.precise ? " exact" : ""}` : "";
-  if (!job.batch) log(`[${id}] new job: ${opts.mode} ${opts.quality}/${opts.codec}/${opts.audioFormat}${cut} ${url}`);
+  const cut = opts.trim ? ` cut ${opts.trim.start}-${opts.trim.end ?? 'end'}${opts.trim.precise ? ' exact' : ''}` : '';
+  const subs = opts.subs ? ` subs ${[...opts.subs.langs, opts.subs.auto ? 'auto' : ''].filter(Boolean).join('+')}${opts.subs.srt ? ' srt' : ''}` : '';
+  if (!job.batch) log(`[${id}] new job: ${opts.mode} ${opts.quality}/${opts.codec}/${opts.audioFormat}${cut}${subs} ${url}`);
   pump();
   return job;
 }
@@ -832,6 +893,12 @@ async function serveZip(res, batch) {
   for (const j of done) {
     j.crc ??= await fileCrc32(j.file);
     entries.push({ name: j.fileName, path: j.file, size: j.size, crc: j.crc });
+    // .srt files that were asked for go next to their video
+    for (const f of j.subs?.files || []) {
+      if (!fs.existsSync(f.path)) continue;
+      f.crc ??= await fileCrc32(f.path);
+      entries.push({ name: f.name, path: f.path, size: fs.statSync(f.path).size, crc: f.crc });
+    }
   }
   const { length, stream } = createZip(entries);
   const name = batch.title.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'playlist';
@@ -941,15 +1008,17 @@ function contentDisposition(name) {
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
 
-function serveFile(req, res, job) {
-  if (!job || job.status !== 'done' || !fs.existsSync(job.file)) {
+// file: the job's video by default, or one of its .srt files
+function serveFile(req, res, job, file = job && { path: job.file, name: job.fileName }) {
+  if (!job || job.status !== 'done' || !file || !fs.existsSync(file.path)) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end('File not found or expired.');
   }
-  const size = fs.statSync(job.file).size;
+  const filePath = file.path;
+  const size = fs.statSync(filePath).size;
   const headers = {
     'Content-Type': 'application/octet-stream',
-    'Content-Disposition': contentDisposition(job.fileName),
+    'Content-Disposition': contentDisposition(file.name),
     'Accept-Ranges': 'bytes',
     'Cache-Control': 'no-store',
   };
@@ -963,10 +1032,10 @@ function serveFile(req, res, job) {
     }
     end = Math.min(end, size - 1);
     res.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 });
-    return pipeline(fs.createReadStream(job.file, { start, end }), res, () => {});
+    return pipeline(fs.createReadStream(filePath, { start, end }), res, () => {});
   }
   res.writeHead(200, { ...headers, 'Content-Length': size });
-  pipeline(fs.createReadStream(job.file), res, () => {});
+  pipeline(fs.createReadStream(filePath), res, () => {});
 }
 
 function serveStatic(req, res, pathname) {
@@ -1060,12 +1129,12 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    const jm = /^\/api\/jobs\/([a-f0-9]+)(\/(events|file))?$/.exec(pathname);
+    const jm = /^\/api\/jobs\/([a-f0-9]+)(\/(events|file|subs)(\/(\d+))?)?$/.exec(pathname);
     if (jm) {
       const job = jobs.get(jm[1]);
       const sub = jm[3];
       if (!job) {
-        if (sub === 'file') {
+        if (sub === 'file' || sub === 'subs') {
           res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
           return res.end('File not found or expired.');
         }
@@ -1083,6 +1152,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (sub === 'events' && req.method === 'GET') return openEvents(req, res, job, publicJob(job), isFinal(job.status));
       if (sub === 'file' && (req.method === 'GET' || req.method === 'HEAD')) return serveFile(req, res, job);
+      if (sub === 'subs' && jm[5] != null && req.method === 'GET') return serveFile(req, res, job, job.subs?.files?.[Number(jm[5])] || null);
     }
 
     const bm = /^\/api\/batches\/([a-f0-9]+)(\/(events|zip))?$/.exec(pathname);
