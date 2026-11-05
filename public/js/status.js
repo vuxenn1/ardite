@@ -125,6 +125,18 @@ async function installUpdate() {
   step();
 }
 
+// The versions line under Settings and the warning when the PC's disk is almost full
+function renderAbout() {
+  const s = serverStatus;
+  if (!s) return;
+  const lan = s.lan?.[0];
+  const free = s.disk?.free != null ? ' · ' + t('disk.free', fmtBytes(s.disk.free)) : '';
+  $('#aboutLine').textContent = `Ardite ${s.version ? 'v' + s.version : ''} · yt-dlp ${s.ytdlp || '?'}${lan ? ' · ' + lan : ''}${free}`;
+  const diskBar = $('#diskBar');
+  diskBar.hidden = !s.disk?.low;
+  if (s.disk?.low) diskBar.replaceChildren(h('span', {}, t('disk.low', fmtBytes(s.disk.free), fmtBytes(s.disk.min))));
+}
+
 async function loadStatus() {
   try {
     const s = await api('/api/status');
@@ -134,11 +146,7 @@ async function loadStatus() {
     const lan = s.lan?.[0];
     renderFoot();
     renderUpdate();
-    const free = s.disk?.free != null ? ' · ' + t('disk.free', fmtBytes(s.disk.free)) : '';
-    $('#aboutLine').textContent = `Ardite ${s.version ? 'v' + s.version : ''} · yt-dlp ${s.ytdlp || '?'}${lan ? ' · ' + lan : ''}${free}`;
-    const diskBar = $('#diskBar');
-    diskBar.hidden = !s.disk?.low;
-    if (s.disk?.low) diskBar.replaceChildren(h('span', {}, t('disk.low', fmtBytes(s.disk.free), fmtBytes(s.disk.min))));
+    renderAbout();
     if (lan) {
       renderQr(lan);
       $('#phoneBtn').hidden = isTouch;

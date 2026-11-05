@@ -255,8 +255,11 @@ function applyLang() {
   renderHistory();
   renderHistoryTable();
   renderLogin();
+  renderPin();
+  renderYtdlp();
   renderFoot();
   renderUpdate();
+  renderAbout();
 }
 
 for (const b of $$('[data-lang-val]')) {

@@ -2,88 +2,7 @@
 // so downloads, the queue, retries, the disk check and previews are tested without internet.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import net from 'node:net';
-import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-
-const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const FAKE = path.join(REPO, '.github', 'fake-yt-dlp.mjs');
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-const freePort = () => new Promise((resolve) => {
-  const s = net.createServer().listen(0, '127.0.0.1', () => {
-    const { port } = s.address();
-    s.close(() => resolve(port));
-  });
-});
-
-async function startServer(config = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ardite-server-test-'));
-  const app = path.join(dir, 'app');
-  const state = path.join(dir, 'state');
-  fs.mkdirSync(path.join(app, 'data'), { recursive: true });
-  fs.mkdirSync(state);
-  for (const f of fs.readdirSync(REPO)) if (f.endsWith('.js')) fs.copyFileSync(path.join(REPO, f), path.join(app, f));
-  for (const dir of ['lib', 'public']) fs.cpSync(path.join(REPO, dir), path.join(app, dir), { recursive: true });
-  fs.copyFileSync(path.join(REPO, 'package.json'), path.join(app, 'package.json'));
-  fs.writeFileSync(path.join(app, 'data', 'config.json'), JSON.stringify({ updateCheck: false, ...config }));
-
-  const port = await freePort();
-  const base = `http://127.0.0.1:${port}`;
-  const proc = spawn(process.execPath, ['server.js'], {
-    cwd: app,
-    env: { ...process.env, PORT: String(port), TEMP: dir, TMP: dir, TMPDIR: dir, ARDITE_YTDLP: FAKE, FAKE_YTDLP_STATE: state },
-    stdio: 'ignore',
-  });
-  for (let i = 0; i < 100; i++) {
-    try {
-      await fetch(base + '/api/status');
-      break;
-    } catch {
-      await sleep(100);
-    }
-  }
-
-  const call = async (p, method = 'GET', body) => {
-    const res = await fetch(base + p, {
-      method,
-      headers: { Origin: base, ...(body ? { 'Content-Type': 'application/json' } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const type = res.headers.get('content-type') || '';
-    return { status: res.status, headers: res.headers, data: type.includes('json') ? await res.json() : Buffer.from(await res.arrayBuffer()) };
-  };
-  const read = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '');
-  return {
-    base,
-    call,
-    // the stand-in's notes, e.g. "download-start a1"
-    calls: () => read(path.join(state, 'calls.log')).split('\n').filter(Boolean).map((l) => {
-      const [time, what, id] = l.split(' ');
-      return { time: Number(time), what, id };
-    }),
-    log: () => read(path.join(app, 'data', 'ardite.log')),
-    async stop() {
-      proc.kill();
-      await new Promise((r) => (proc.exitCode !== null ? r() : proc.once('exit', r)));
-      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-    },
-  };
-}
-
-// Polls until check() returns something truthy
-async function waitFor(check, what, timeout = 15000) {
-  const end = Date.now() + timeout;
-  for (;;) {
-    const value = await check();
-    if (value) return value;
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-    await sleep(100);
-  }
-}
+import { startServer, waitFor, sleep } from '../.github/test-server.mjs';
 
 const job = (s, id) => s.call(`/api/jobs/${id}`).then((r) => r.data);
 const finished = (s, id) => waitFor(async () => {
@@ -95,7 +14,7 @@ const start = async (s, url, extra = {}) => (await s.call('/api/jobs', 'POST', {
 // one download at a time, so the queue order is easy to see
 let s;
 before(async () => {
-  s = await startServer({ maxConcurrent: 1, minFreeGB: 0.5 });
+  s = await startServer({ config: { maxConcurrent: 1, minFreeGB: 0.5 } });
 });
 after(() => s?.stop());
 
@@ -214,7 +133,7 @@ test('a preview nobody waits for anymore is stopped', async () => {
 });
 
 test('no download starts without enough free disk space', async () => {
-  const tight = await startServer({ minFreeGB: 1e9 });
+  const tight = await startServer({ config: { minFreeGB: 1e9 } });
   try {
     const j = await start(tight, 'https://fake.test/n1');
     const done = await finished(tight, j.id);
