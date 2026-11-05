@@ -59,6 +59,27 @@ function Copy-Over([string]$From, [string]$To) {
   }
 }
 
+# Windows can keep a program file (runtime\node.exe) locked for a while after the program has
+# stopped, e.g. while antivirus looks at it. So the copy is tried again for up to about 30 s,
+# noting what still runs from the Ardite folder each time.
+function Copy-OverWithRetry([string]$From, [string]$To) {
+  for ($try = 1; ; $try++) {
+    try {
+      Copy-Over $From $To
+      return
+    } catch {
+      if ($try -ge 10) { throw }
+      $inside = $AppDir.TrimEnd('\') + '\'
+      $running = @(Get-CimInstance Win32_Process | Where-Object {
+        $_.ExecutablePath -and $_.ExecutablePath.StartsWith($inside, [StringComparison]::OrdinalIgnoreCase)
+      } | ForEach-Object { "$($_.Name) (PID $($_.ProcessId))" }) -join ', '
+      Write-Log "files still in use, trying again in 3 s ($try/9): $($_.Exception.Message) Running from the folder: $(if ($running) { $running } else { 'nothing' })"
+      Start-Sleep -Seconds 3
+      Stop-Ardite
+    }
+  }
+}
+
 # Release packages list their files in files.txt ("public/js/app.js" etc.). Only plain relative
 # paths count: nothing in data or bin, nothing outside the folder.
 function Read-FileList([string]$Dir) {
@@ -131,7 +152,7 @@ try {
 
 try {
   # 3. new files in
-  Copy-Over $NewDir $AppDir
+  Copy-OverWithRetry $NewDir $AppDir
   Write-Log 'new files copied'
   if ($stale.Count) { Remove-StaleFiles $stale }
 
