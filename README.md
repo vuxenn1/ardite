@@ -45,7 +45,7 @@ Requires Windows 10/11. Nothing else to install.
 2. Extract it somewhere permanent (for example your Documents folder).
 3. Double-click `install.bat` and click **Yes** when Windows asks for firewall permission.
 
-This downloads yt-dlp and ffmpeg, makes Ardite start in the background with Windows and opens the firewall for your home network.
+This downloads yt-dlp and ffmpeg (each checked against its published SHA-256 hash), makes Ardite start in the background with Windows and opens the firewall for your home network. Ardite keeps yt-dlp up to date by itself and updates ffmpeg about once a month.
 
 ### Updating
 

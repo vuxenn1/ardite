@@ -18,6 +18,7 @@ import {
 import { subtitleArgs, findSubFiles, shiftSrt, embedSubs } from './subs.js';
 import { createUpdater, readRelease } from './updater.js';
 import { validPin, hashPin, checkPin, parseCookies, createLimiter, createSessions } from './auth.js';
+import { ffmpegDue, installFfmpeg } from './tools.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -858,6 +859,26 @@ function updateYtdlp() {
   });
 }
 
+// ---------- ffmpeg update (about once a month, see tools.js) ----------
+
+let ffmpegUpdating = false;
+const idle = () => running === 0 && !queue.some((j) => j.status === 'queued');
+
+async function updateFfmpeg() {
+  if (process.platform !== 'win32' || ffmpegUpdating || !idle() || !ffmpegDue(BIN)) return;
+  ffmpegUpdating = true;
+  log('ffmpeg update: downloading the latest build');
+  try {
+    // the files are only swapped while nothing is downloading
+    const sha256 = await installFfmpeg(BIN, { canReplace: idle });
+    log(`ffmpeg update: done (sha256 ${sha256.slice(0, 12)}…, verified)`);
+  } catch (e) {
+    log(`ffmpeg update: ${e.code === 'toolBusy' ? 'postponed, a download is running' : 'failed: ' + e.message}`);
+  } finally {
+    ffmpegUpdating = false;
+  }
+}
+
 // ---------- HTTP ----------
 
 const MIME = {
@@ -1349,6 +1370,8 @@ server.listen(config.port, config.host, () => {
   readVersion();
   setTimeout(updateYtdlp, 5000);
   setInterval(updateYtdlp, 12 * 60 * 60 * 1000);
+  setTimeout(updateFfmpeg, 10 * 60 * 1000);
+  setInterval(updateFfmpeg, 12 * 60 * 60 * 1000);
   setTimeout(checkForUpdate, 8000);
   setInterval(checkForUpdate, 12 * 60 * 60 * 1000);
   // drop stale preview info
