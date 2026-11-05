@@ -103,6 +103,8 @@ Optional settings go in `data/config.json`, for example:
 | `maxPlaylistItems` | Most videos shown for a playlist |
 | `cookiesFromBrowser` | Use a browser's login (`firefox`); set from Settings. Chrome and Edge don't work on Windows |
 | `updateCheck` | Look for new Ardite versions on GitHub |
+| `tempFolder` | Where downloads wait on the PC until they're saved, e.g. `"D:\\Ardite"` (Windows' temp folder by default) |
+| `minFreeGB` | Free space a download needs to start (default 2). A running download stops before the disk drops below half of it |
 | `allowedHosts` | Extra names Ardite may be opened with, e.g. `["mypc.tail1234.ts.net"]`. IP addresses, `localhost` and the PC's own name always work; other names are refused so websites can't use Ardite |
 
 <details>

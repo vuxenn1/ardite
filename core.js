@@ -257,3 +257,10 @@ export function originAllowed(origin, hostHeader) {
     return false; // includes "null", sent by sandboxed pages and local files
   }
 }
+
+// Disk space: a download only starts with at least `min` bytes free, and a running one is
+// stopped when what it still has to write would leave less than half of that.
+export function lowOnSpace(free, min, { starting = false, remaining = 0 } = {}) {
+  if (!Number.isFinite(free)) return false; // unknown: don't block anything
+  return starting ? free < min : free - Math.max(0, remaining || 0) < min / 2;
+}

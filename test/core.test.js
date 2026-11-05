@@ -3,8 +3,19 @@ import assert from 'node:assert/strict';
 import {
   isValidUrl, friendlyError, lastError, shortSide, summarizeVideo, summarizePlaylist, videoStats,
   linkKind, expectedHeight, codecName, parseOptions, parseTrim, fileClock, isNewer, contentDisposition,
-  parseCookiesTxt, hostAllowed, originAllowed,
+  parseCookiesTxt, hostAllowed, originAllowed, lowOnSpace,
 } from '../core.js';
+
+test('lowOnSpace: downloads need the minimum to start and stop at half of it', () => {
+  const GB = 1024 ** 3;
+  assert.equal(lowOnSpace(1.9 * GB, 2 * GB, { starting: true }), true);
+  assert.equal(lowOnSpace(2 * GB, 2 * GB, { starting: true }), false);
+  // running: 3 GB free, 1.5 GB still to write -> 1.5 GB left, above the 1 GB floor
+  assert.equal(lowOnSpace(3 * GB, 2 * GB, { remaining: 1.5 * GB }), false);
+  assert.equal(lowOnSpace(3 * GB, 2 * GB, { remaining: 2.5 * GB }), true);
+  assert.equal(lowOnSpace(0.9 * GB, 2 * GB), true);
+  assert.equal(lowOnSpace(Infinity, 2 * GB, { starting: true }), false); // unknown never blocks
+});
 
 test('hostAllowed accepts IP addresses, localhost and the PC\'s own names only', () => {
   const names = ['MyPC', 'mypc.tail1234.ts.net'];

@@ -930,6 +930,7 @@ function update(task, data) {
     if (settings.autoSave && !task.saved) saveTask(task);
   } else if (data.status === 'error') {
     toast(errText(data.error, 'err.failed'));
+    if (data.error?.code === 'diskFull') loadStatus(); // shows the warning bar
   }
 }
 
@@ -1653,7 +1654,11 @@ async function loadStatus() {
     const lan = s.lan?.[0];
     renderFoot();
     renderUpdate();
-    $('#aboutLine').textContent = `Ardite ${s.version ? 'v' + s.version : ''} · yt-dlp ${s.ytdlp || '?'}${lan ? ' · ' + lan : ''}`;
+    const free = s.disk?.free != null ? ' · ' + t('disk.free', fmtBytes(s.disk.free)) : '';
+    $('#aboutLine').textContent = `Ardite ${s.version ? 'v' + s.version : ''} · yt-dlp ${s.ytdlp || '?'}${lan ? ' · ' + lan : ''}${free}`;
+    const diskBar = $('#diskBar');
+    diskBar.hidden = !s.disk?.low;
+    if (s.disk?.low) diskBar.replaceChildren(h('span', {}, t('disk.low', fmtBytes(s.disk.free), fmtBytes(s.disk.min))));
     if (lan) {
       renderQr(lan);
       $('#phoneBtn').hidden = isTouch;

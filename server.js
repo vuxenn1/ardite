@@ -13,7 +13,7 @@ import { createZip, fileCrc32 } from './zip.js';
 import {
   isValidUrl, friendlyError, fail, lastError, shortSide, summarizeVideo, summarizePlaylist,
   videoStats, linkKind, expectedHeight, codecName, parseOptions, parseTrim, fileClock, isNewer,
-  contentDisposition, parseCookiesTxt, hostAllowed, originAllowed,
+  contentDisposition, parseCookiesTxt, hostAllowed, originAllowed, lowOnSpace,
 } from './core.js';
 import { subtitleArgs, findSubFiles, shiftSrt, embedSubs } from './subs.js';
 import { createUpdater, readRelease } from './updater.js';
@@ -41,11 +41,14 @@ const config = {
   updateCheck: true, // look for new Ardite releases on GitHub
   repo: 'vuxenn1/ardite',
   allowedHosts: [], // extra names this PC is opened with, e.g. a Tailscale name
+  tempFolder: '', // where downloads wait to be saved; Windows' temp folder when empty
+  minFreeGB: 2, // downloads don't start with less free space than this
   ...readJson(path.join(DATA, 'config.json')),
 };
 if (process.env.PORT) config.port = Number(process.env.PORT);
 // Temp folder for downloads. It's emptied at start, so each port (each Ardite) gets its own.
-const WORK = path.join(os.tmpdir(), `ardite-jobs-${config.port}`);
+const WORK = path.join(config.tempFolder || os.tmpdir(), `ardite-jobs-${config.port}`);
+const MIN_FREE = Math.max(0.5, Number(config.minFreeGB) || 2) * 1024 ** 3;
 const COOKIES_FILE = path.join(DATA, 'cookies.txt');
 const HISTORY_FILE = path.join(DATA, 'history.json');
 const HISTORY_MAX = 500;
@@ -338,7 +341,41 @@ function parseProgress(job, line) {
     speed: num(speed),
     eta: num(eta),
   };
+  watchSpace(job);
   emit(job);
+}
+
+// ---------- disk space ----------
+
+function freeSpace() {
+  try {
+    const s = fs.statfsSync(WORK);
+    return s.bavail * s.bsize;
+  } catch {
+    return Infinity; // unknown
+  }
+}
+
+const gb = (n) => `${(n / 1024 ** 3).toFixed(1)} GB`;
+
+function diskStatus() {
+  const free = freeSpace();
+  return { free: Number.isFinite(free) ? free : null, min: MIN_FREE, low: lowOnSpace(free, MIN_FREE, { starting: true }) };
+}
+const diskFull = (free) => ({ ...fail('diskFull', 'Not enough free disk space on the PC.'), detail: `${gb(free)} free` });
+
+// Stops a running download before it fills the disk (checked every few seconds)
+function watchSpace(job) {
+  const now = Date.now();
+  if (job.abort || now - (job.spaceChecked || 0) < 3000) return;
+  job.spaceChecked = now;
+  const p = job.progress;
+  const free = freeSpace();
+  if (lowOnSpace(free, MIN_FREE, { remaining: p.total && p.downloaded != null ? p.total - p.downloaded : 0 })) {
+    job.abort = diskFull(free);
+    log(`[${job.id}] stopped: the disk is almost full (${gb(free)} free)`);
+    killTree(job.proc);
+  }
 }
 
 function parseLog(job, line) {
@@ -360,6 +397,13 @@ function parseLog(job, line) {
 }
 
 function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
+  const free = freeSpace();
+  if (lowOnSpace(free, MIN_FREE, { starting: true })) {
+    job.status = 'error';
+    job.error = diskFull(free);
+    log(`[${job.id}] not started: only ${gb(free)} free on the disk (minFreeGB is ${gb(MIN_FREE)})`);
+    return finish(job);
+  }
   job.status = 'running';
   job.phase = job.opts.trim ? 'trimming' : 'starting';
   job.media = null;
@@ -388,6 +432,13 @@ function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
   proc.on('close', (code) => {
     job.proc = null;
     if (job.status === 'canceled') return finish(job);
+
+    if (job.abort) {
+      job.status = 'error';
+      job.error = job.abort;
+      fs.rmSync(job.dir, { recursive: true, force: true });
+      return finish(job);
+    }
 
     if (code !== 0 && source.infoFile) {
       // The cached info may be stale (e.g. expired stream URLs), so retry from the link
@@ -1110,6 +1161,7 @@ const server = http.createServer(async (req, res) => {
         lan: lanAddresses().map((ip) => `http://${ip}:${config.port}`),
         cookies: cookiesFileOk() ? 'file' : config.cookiesFromBrowser || null,
         pin: pinOn(),
+        disk: diskStatus(),
       });
     }
 
