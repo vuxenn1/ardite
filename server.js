@@ -128,10 +128,70 @@ function killTree(proc) {
 const infoCache = new Map(); // url -> { file, time }
 const INFO_TTL = 20 * 60 * 1000;
 
-function fetchInfo(url, playlist) {
+// At most a few previews run at once, the others wait their turn. The same link asked for
+// twice (e.g. from two devices) shares one yt-dlp run, and a run nobody waits for anymore
+// (the page was closed or another link pasted) is stopped.
+const INFO_MAX = 3;
+let infoRunning = 0;
+const infoWaiting = [];
+const infoRuns = new Map(); // "video|<url>" or "list|<url>" -> { promise, users, proc, gone }
+
+const canceledError = () => Object.assign(new Error('canceled'), { code: 'canceled' });
+
+function infoSlot() {
+  if (infoRunning < INFO_MAX) {
+    infoRunning++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => infoWaiting.push(resolve));
+}
+
+function freeInfoSlot() {
+  const next = infoWaiting.shift();
+  if (next) next(); // the slot passes straight on
+  else infoRunning--;
+}
+
+function fetchInfo(url, playlist, signal) {
+  const key = `${playlist ? 'list' : 'video'}|${url}`;
+  let run = infoRuns.get(key);
+  if (!run) {
+    run = { users: 0, proc: null, gone: false };
+    run.promise = runInfo(run, url, playlist).finally(() => {
+      if (infoRuns.get(key) === run) infoRuns.delete(key);
+    });
+    infoRuns.set(key, run);
+  }
+  run.users++;
+  return new Promise((resolve, reject) => {
+    const leave = () => {
+      reject(canceledError());
+      if (--run.users > 0) return;
+      run.gone = true;
+      if (infoRuns.get(key) === run) infoRuns.delete(key);
+      killTree(run.proc);
+    };
+    if (signal?.aborted) return leave();
+    signal?.addEventListener('abort', leave, { once: true });
+    run.promise.then(resolve, reject).finally(() => signal?.removeEventListener('abort', leave));
+  });
+}
+
+async function runInfo(run, url, playlist) {
+  await infoSlot();
+  try {
+    if (run.gone) throw canceledError(); // given up while waiting for a slot
+    return await spawnInfo(run, url, playlist);
+  } finally {
+    freeInfoSlot();
+  }
+}
+
+function spawnInfo(run, url, playlist) {
   return new Promise((resolve, reject) => {
     const args = [...commonArgs(), '-J', '--flat-playlist', playlist ? '--yes-playlist' : '--no-playlist', '--', url];
     const proc = spawn(YTDLP, args, { windowsHide: true });
+    run.proc = proc;
     let out = '';
     let err = '';
     const timer = setTimeout(() => killTree(proc), 120000);
@@ -157,18 +217,31 @@ function cacheInfo(url, json, info) {
   infoCache.set(url, { file, time: Date.now(), stats: videoStats(info) });
 }
 
-async function getInfo(url) {
+// The info of a video previewed a few minutes ago, without asking yt-dlp again
+function cachedInfo(url) {
+  const c = infoCache.get(url);
+  if (!c || Date.now() - c.time > INFO_TTL) return null;
+  try {
+    return JSON.parse(fs.readFileSync(c.file, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+async function getInfo(url, signal) {
   const kind = linkKind(url);
   if (!kind.list) {
-    const res = await fetchInfo(url, false);
+    const cached = cachedInfo(url);
+    if (cached) return summarizeVideo(cached);
+    const res = await fetchInfo(url, false, signal);
     if (res.info._type === 'playlist') return summarizePlaylist(res.info, config.maxPlaylistItems);
     cacheInfo(url, res.json, res.info);
     return summarizeVideo(res.info);
   }
 
   const [list, single] = await Promise.allSettled([
-    fetchInfo(url, true),
-    kind.video ? fetchInfo(url, false) : Promise.reject(null),
+    fetchInfo(url, true, signal),
+    kind.video ? fetchInfo(url, false, signal) : Promise.reject(null),
   ]);
   const video = single.status === 'fulfilled' && single.value.info._type !== 'playlist' ? single.value : null;
   if (video) cacheInfo(url, video.json, video.info);
@@ -1271,9 +1344,15 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/info' && req.method === 'POST') {
       const body = await readBody(req);
       if (!isValidUrl(body.url)) return sendJson(res, 400, fail('invalidUrl', 'Enter a valid link.'));
+      // the page went away or asked for another link: stop working on this one
+      const gone = new AbortController();
+      res.on('close', () => {
+        if (!res.writableFinished) gone.abort();
+      });
       try {
-        return sendJson(res, 200, await getInfo(body.url));
+        return sendJson(res, 200, await getInfo(body.url, gone.signal));
       } catch (e) {
+        if (gone.signal.aborted) return res.destroy();
         return sendJson(res, 422, e?.message ? e : fail('noInfo', 'Couldn\'t get video info.'));
       }
     }

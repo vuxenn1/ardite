@@ -188,6 +188,9 @@ const parkPanel = () => $('#optsHolder').append(optsPanel);
 let preview = null; // { url, data, error, promise, scope, selected:Set }
 let previewSeq = 0;
 let previewTimer;
+// Cancels the preview request still in progress; the server then stops working on it
+let previewAbort = null;
+const stopPreviewRequest = () => previewAbort?.abort();
 
 function updateInputButtons() {
   const has = input.value.trim().length > 0;
@@ -197,6 +200,7 @@ function updateInputButtons() {
 
 function resetPreview() {
   clearTimeout(previewTimer);
+  stopPreviewRequest();
   previewSeq++;
   preview = null;
   parkPanel();
@@ -208,6 +212,8 @@ function resetPreview() {
 
 function loadPreview(url) {
   const seq = ++previewSeq;
+  stopPreviewRequest();
+  previewAbort = new AbortController();
   preview = { url, data: null, error: null, scope: 'video', selected: new Set() };
   // trimming and subtitles belong to one video; a new link starts without them
   resetTrim();
@@ -223,7 +229,7 @@ function loadPreview(url) {
       h('div', { class: 'skeleton sk-line', style: 'width: 30%; height: 11px' }))));
 
   const current = preview;
-  current.promise = api('/api/info', { method: 'POST', body: { url } })
+  current.promise = api('/api/info', { method: 'POST', body: { url }, signal: previewAbort.signal })
     .then((data) => {
       if (seq !== previewSeq) return;
       current.data = data;
