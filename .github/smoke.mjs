@@ -34,14 +34,16 @@ const get = async (p, init) => {
   const res = await fetch(base + p, init);
   return { status: res.status, type: res.headers.get('content-type') || '', text: await res.text() };
 };
-// fetch() won't send a made-up Host header, so these requests go through http directly
-const raw = (p, method, headers) => new Promise((resolve, reject) => {
-  const req = http.request({ host: '127.0.0.1', port, path: p, method, headers }, (res) => {
-    res.resume();
-    res.on('end', () => resolve(res.statusCode));
+// fetch() won't send a made-up Host header or use another local address, so these go through http.
+// Requests from 127.0.0.2 count as another device (only 127.0.0.1 is "this PC").
+const raw = (p, method, headers, { body = method === 'POST' ? '{}' : undefined, from } = {}) => new Promise((resolve, reject) => {
+  const req = http.request({ host: '127.0.0.1', port, path: p, method, headers, localAddress: from }, (res) => {
+    let text = '';
+    res.on('data', (d) => (text += d));
+    res.on('end', () => resolve({ status: res.statusCode, text }));
   });
   req.on('error', reject);
-  req.end(method === 'POST' ? '{}' : undefined);
+  req.end(body);
 });
 
 try {
@@ -81,10 +83,19 @@ try {
   check(escape.status === 403 || escape.status === 404, 'files outside public/ are not served');
 
   // other websites can't use Ardite
-  check(await raw('/api/history', 'GET', { Host: `evil.example:${port}` }) === 403, 'refuses a foreign address (DNS rebinding)');
-  check(await raw('/api/jobs', 'POST', { Origin: 'https://evil.example', 'Content-Type': 'text/plain' }) === 403,
+  check((await raw('/api/history', 'GET', { Host: `evil.example:${port}` })).status === 403, 'refuses a foreign address (DNS rebinding)');
+  check((await raw('/api/jobs', 'POST', { Origin: 'https://evil.example', 'Content-Type': 'text/plain' })).status === 403,
     'refuses a download started by another website');
-  check(await raw('/api/info', 'POST', { Origin: base }) === 400, 'accepts its own page');
+  check((await raw('/api/info', 'POST', { Origin: base })).status === 400, 'accepts its own page');
+
+  // with a PIN, other devices are locked out until they enter it; this PC never is
+  const json = { Origin: base, 'Content-Type': 'application/json' };
+  check((await raw('/api/pin', 'PUT', json, { body: '{"pin":"2468"}' })).status === 200, 'sets a PIN');
+  check(JSON.parse((await raw('/api/status', 'GET', {}, { from: '127.0.0.2' })).text).locked === true, 'another device sees the lock');
+  check((await raw('/api/history', 'GET', {}, { from: '127.0.0.2' })).status === 401, 'another device can\'t read the history');
+  check((await get('/api/history')).status === 200, 'this PC needs no PIN');
+  check((await raw('/api/unlock', 'POST', json, { body: '{"pin":"2468"}', from: '127.0.0.2' })).status === 200, 'the right PIN unlocks');
+  check((await raw('/api/pin', 'DELETE', { Origin: base })).status === 200, 'removes the PIN');
 } catch (e) {
   failures.push(e.message);
 } finally {

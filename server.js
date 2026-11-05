@@ -17,6 +17,7 @@ import {
 } from './core.js';
 import { subtitleArgs, findSubFiles, shiftSrt, embedSubs } from './subs.js';
 import { createUpdater, readRelease } from './updater.js';
+import { validPin, hashPin, checkPin, parseCookies, createLimiter, createSessions } from './auth.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -1018,12 +1019,85 @@ function refuseForeign(req, res) {
   return false;
 }
 
+// ---------- PIN (optional) ----------
+
+const sessions = createSessions(path.join(DATA, 'sessions.json'));
+// wrong PINs per device, and from all devices together so many devices can't share the guessing
+const pinTries = createLimiter();
+const pinTriesAll = createLimiter({ free: 20 });
+const SESSION_COOKIE = `ardite_${config.port}`;
+const pinOn = () => !!config.pin?.hash;
+
+// Requests made on this PC itself (its browser, the .bat scripts) never need the PIN
+function isThisPc(req) {
+  const ip = (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  if (ip === '127.0.0.1' || ip === '::1') return true;
+  return Object.values(os.networkInterfaces()).flat().some((a) => a && a.address === ip);
+}
+
+const sessionToken = (req) => parseCookies(req.headers.cookie)[SESSION_COOKIE];
+const signedIn = (req) => !pinOn() || isThisPc(req) || sessions.check(sessionToken(req));
+
+function setSessionCookie(res, req) {
+  const token = sessions.add(deviceOf(req));
+  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${365 * 86400}`);
+}
+
+function pinStatus(req) {
+  return { pin: pinOn(), thisPc: isThisPc(req), devices: sessions.size };
+}
+
+// Unlocking, and setting or removing the PIN. Returns true when the request was handled here.
+async function handlePin(req, res, pathname) {
+  const reply = (status, data) => (sendJson(res, status, data), true);
+  if (pathname === '/api/unlock' && req.method === 'POST') {
+    if (!pinOn() || signedIn(req)) return reply(200, { ok: true });
+    const ip = (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+    const wait = Math.max(pinTries.wait(ip), pinTriesAll.wait('*'));
+    if (wait) return reply(429, { ...fail('pinWait', 'Too many wrong PINs. Wait a bit.'), wait: Math.ceil(wait / 1000) });
+    const { pin } = await readBody(req);
+    if (!checkPin(pin, config.pin)) {
+      pinTries.fail(ip);
+      pinTriesAll.fail('*');
+      log(`wrong PIN from ${ip}`);
+      return reply(401, fail('pinWrong', 'Wrong PIN.'));
+    }
+    pinTries.ok(ip);
+    setSessionCookie(res, req);
+    log(`device unlocked with the PIN (${deviceOf(req)}, ${ip})`);
+    return reply(200, { ok: true });
+  }
+
+  if (pathname !== '/api/pin') return false;
+  if (!signedIn(req)) return reply(401, fail('locked', 'Enter the PIN.'));
+  if (req.method === 'GET') return reply(200, pinStatus(req));
+  if (req.method === 'PUT') {
+    const { pin } = await readBody(req);
+    if (!validPin(pin)) return reply(400, fail('pinFormat', 'The PIN needs 4 to 64 characters.'));
+    saveConfig({ pin: hashPin(pin) });
+    // a new PIN signs every other device out; the one that set it stays in
+    sessions.clear();
+    if (!isThisPc(req)) setSessionCookie(res, req);
+    log('PIN set, other devices signed out');
+    return reply(200, pinStatus(req));
+  }
+  if (req.method === 'DELETE') {
+    saveConfig({ pin: '' });
+    sessions.clear();
+    log('PIN removed');
+    return reply(200, pinStatus(req));
+  }
+  return false;
+}
+
 const server = http.createServer(async (req, res) => {
   const { pathname } = new URL(req.url, 'http://x');
   if (refuseForeign(req, res)) return;
 
   try {
     if (pathname === '/api/status' && req.method === 'GET') {
+      // locked devices only learn that this is Ardite and that it wants the PIN
+      if (!signedIn(req)) return sendJson(res, 200, { name: 'Ardite', version: VERSION, locked: true });
       return sendJson(res, 200, {
         name: 'Ardite',
         version: VERSION,
@@ -1035,8 +1109,15 @@ const server = http.createServer(async (req, res) => {
         repo: `https://github.com/${config.repo}`,
         lan: lanAddresses().map((ip) => `http://${ip}:${config.port}`),
         cookies: cookiesFileOk() ? 'file' : config.cookiesFromBrowser || null,
+        pin: pinOn(),
       });
     }
+
+    if (await handlePin(req, res, pathname)) return;
+
+    // Everything else in the API needs the PIN (when one is set). The page itself loads
+    // without it, so it can ask for the PIN.
+    if (pathname.startsWith('/api/') && !signedIn(req)) return sendJson(res, 401, fail('locked', 'Enter the PIN.'));
 
     if (pathname === '/api/login' && req.method === 'GET') return sendJson(res, 200, loginStatus());
 

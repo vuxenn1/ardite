@@ -153,6 +153,7 @@ async function api(path, options = {}) {
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && data.code === 'locked') showLock();
   if (!res.ok) throw Object.assign(new Error(data.message || t('err.generic')), { status: res.status, data, code: data.code });
   return data;
 }
@@ -1298,6 +1299,7 @@ function openSettings() {
   markLang();
   settingsDlg.showModal();
   loadLogin();
+  loadPin();
 }
 
 $('#settingsBtn').addEventListener('click', openSettings);
@@ -1394,6 +1396,78 @@ async function runLoginTest() {
   }
   renderLogin();
 }
+
+// ---------- PIN lock (a setting of the PC, for all other devices) ----------
+
+let pinState = null; // { pin, thisPc, devices }
+
+async function loadPin() {
+  try {
+    pinState = await api('/api/pin');
+  } catch { pinState = null; }
+  renderPin();
+}
+
+function renderPin() {
+  const box = $('#pinBox');
+  if (!pinState) return box.replaceChildren();
+  const input = h('input', {
+    type: 'password', class: 'pin-input', autocomplete: 'new-password',
+    placeholder: t(pinState.pin ? 'pin.new' : 'pin.choose'), 'aria-label': t(pinState.pin ? 'pin.new' : 'pin.choose'),
+    // Enter would submit the settings form and close it
+    onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); savePin(input.value); } },
+  });
+  box.replaceChildren(
+    h('p', { class: 'login-status' + (pinState.pin ? ' on' : '') }, pinState.pin ? t('pin.on', pinState.devices) : t('pin.off')),
+    h('div', { class: 'pin-row' }, input,
+      h('button', { type: 'button', class: 'hist-btn', onclick: () => savePin(input.value) }, t(pinState.pin ? 'pin.change' : 'pin.set'))),
+    pinState.pin && h('div', { class: 'login-actions' },
+      h('button', { type: 'button', class: 'hist-btn', onclick: removePin }, t('pin.remove'))),
+    h('p', { class: 'tiny login-help' }, t('pin.help')));
+}
+
+async function savePin(pin) {
+  if (pin.length < 4) return toast(t('err.pinFormat'));
+  try {
+    pinState = await api('/api/pin', { method: 'PUT', body: { pin } });
+    toast(t('pin.saved'));
+  } catch (err) { toast(errText(err)); }
+  renderPin();
+}
+
+async function removePin() {
+  if (!confirm(t('pin.removeConfirm'))) return;
+  try {
+    pinState = await api('/api/pin', { method: 'DELETE' });
+    toast(t('pin.removed'));
+  } catch (err) { toast(errText(err)); }
+  renderPin();
+}
+
+// The lock screen: shown when the server says this device needs the PIN
+const lockDlg = $('#lockDlg');
+lockDlg.addEventListener('cancel', (e) => e.preventDefault()); // Esc doesn't get around it
+
+function showLock() {
+  if (lockDlg.open) return;
+  for (const d of $$('dialog[open]')) d.close();
+  lockDlg.showModal();
+  $('#lockPin').focus();
+}
+
+$('#lockForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const error = $('#lockError');
+  const pin = $('#lockPin');
+  try {
+    await api('/api/unlock', { method: 'POST', body: { pin: pin.value } });
+    location.reload(); // starts the page again, now signed in
+  } catch (err) {
+    error.textContent = err.code === 'pinWait' && err.data?.wait ? t('lock.wait', err.data.wait) : errText(err);
+    error.hidden = false;
+    pin.select();
+  }
+});
 
 settingsDlg.addEventListener('change', (e) => {
   if (e.target.name === 'codec') { settings.codec = e.target.value; settings.codecChosen = true; }
@@ -1573,6 +1647,7 @@ async function installUpdate() {
 async function loadStatus() {
   try {
     const s = await api('/api/status');
+    if (s.locked) return showLock();
     serverStatus = s;
     if (s.repo) $('#githubLink').href = s.repo;
     const lan = s.lan?.[0];

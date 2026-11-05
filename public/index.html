@@ -186,6 +186,11 @@
         <input id="cookieFile" type="file" accept=".txt,text/plain" hidden>
       </fieldset>
 
+      <fieldset>
+        <legend data-i18n="pin.title"></legend>
+        <div id="pinBox" class="login-box"></div>
+      </fieldset>
+
       <p class="tiny" id="aboutLine"></p>
     </form>
   </dialog>
@@ -231,6 +236,19 @@
         <p id="histEmpty" class="hint" hidden></p>
       </div>
     </div>
+  </dialog>
+
+  <!-- Shown to other devices when a PIN is set, until they enter it -->
+  <dialog id="lockDlg" class="sheet lock">
+    <form id="lockForm" class="sheet-inner center">
+      <img src="/icon.svg" alt="" width="44" height="44">
+      <h2 data-i18n="lock.title"></h2>
+      <p data-i18n="lock.text"></p>
+      <input id="lockPin" class="pin-input" type="password" autocomplete="current-password" required
+             data-i18n-attr="aria-label:lock.label,placeholder:lock.label">
+      <p id="lockError" class="login-result bad" hidden></p>
+      <button class="primary-btn wide" type="submit" data-i18n="lock.unlock"></button>
+    </form>
   </dialog>
 
   <div id="toast" class="toast" role="status"></div>

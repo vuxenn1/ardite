@@ -34,6 +34,7 @@
 - **Playlists**: choose the videos you want and get them as a ZIP
 - **Any device**: scan the QR code on the PC to open Ardite on your phone. Files are saved on whichever device you use.
 - **Shared history**: see what was downloaded on every device (titles and links only, never the files)
+- **PIN lock**: optionally keep others on your Wi-Fi out
 - **English and Turkish**, light and dark theme
 
 ## Installation
@@ -65,6 +66,10 @@ Paste a link. The video shows up in a card with all its options: video or audio,
 | `stop.bat` | Stop Ardite |
 | `status.bat` | Show status and addresses |
 | `uninstall.bat` | Remove autostart and the firewall rule |
+
+### PIN lock
+
+By default anyone on your Wi-Fi can open Ardite. To keep others out, set a PIN in **Settings > PIN lock**. Each phone or other device asks for it once and then remembers it; changing the PIN signs them all out. The PC itself never asks, so a forgotten PIN can simply be changed there.
 
 ### Videos that need a login
 
