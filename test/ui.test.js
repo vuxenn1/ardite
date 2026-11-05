@@ -73,7 +73,8 @@ test('Settings: yt-dlp update, PIN and login sections, language', { skip }, asyn
   // the nightly switch installs the other yt-dlp and shows it; switching back returns to stable
   await click(page, '#ytdlpBox input.switch');
   await page.until(`return document.querySelector('#ytdlpBox').textContent.includes('yt-dlp 2099.01.02.000000 · nightly')
-    && document.querySelector('#ytdlpBox input.switch').checked`, 'nightly');
+    && document.querySelector('#ytdlpBox input.switch').checked
+    && document.querySelector('#aboutLine').textContent.includes('yt-dlp 2099.01.02.000000')`, 'nightly');
   await click(page, '#ytdlpBox input.switch');
   await page.until(`return document.querySelector('#ytdlpBox b').textContent === 'yt-dlp 2099.01.01'
     && !document.querySelector('#ytdlpBox input.switch').checked`, 'back to stable');

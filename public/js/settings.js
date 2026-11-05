@@ -25,6 +25,11 @@ async function loadYtdlp() {
     ytdlp = await api('/api/ytdlp');
   } catch { ytdlp = null; }
   renderYtdlp();
+  // the versions line below shows it too
+  if (serverStatus && ytdlp?.version && serverStatus.ytdlp !== ytdlp.version) {
+    serverStatus.ytdlp = ytdlp.version;
+    renderAbout();
+  }
 }
 
 function ytdlpText() {

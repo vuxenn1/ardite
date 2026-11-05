@@ -7,6 +7,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { SOURCES, download, installFfmpeg, removeLeftovers } from './lib/tools.js';
+import { readJson } from './lib/config.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.join(ROOT, 'bin');
@@ -51,10 +52,7 @@ async function main() {
   } else {
     // yt-dlp checks its own updates against the same checksum list. It follows the channel picked
     // in Settings (stable or nightly); "@latest" also lets it go back from nightly to stable.
-    let channel = 'stable';
-    try {
-      if (JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'config.json'), 'utf8').replace(/^﻿/, '')).ytdlpChannel === 'nightly') channel = 'nightly';
-    } catch { /* no settings yet */ }
+    const channel = readJson(path.join(ROOT, 'data', 'config.json')).ytdlpChannel === 'nightly' ? 'nightly' : 'stable';
     console.log(`  yt-dlp already installed, updating (${channel})...`);
     try {
       execFileSync(ytdlp, ['--update-to', `${channel}@latest`], { stdio: 'ignore', timeout: 120000 });

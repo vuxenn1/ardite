@@ -45,7 +45,7 @@ Requires Windows 10/11. Nothing else to install.
 2. Extract it somewhere permanent (for example your Documents folder).
 3. Double-click `install.bat` and click **Yes** when Windows asks for firewall permission.
 
-This downloads yt-dlp and ffmpeg (each checked against its published SHA-256 hash), makes Ardite start in the background with Windows and opens the firewall for your home network. Ardite keeps yt-dlp up to date by itself and updates ffmpeg about once a month.
+This downloads yt-dlp and ffmpeg (each checked against its published SHA-256 hash), makes Ardite start in the background with Windows and opens the firewall for your home network. Ardite keeps yt-dlp up to date by itself (Settings can switch it to daily nightly builds) and updates ffmpeg about once a month.
 
 ### Updating
 
@@ -103,6 +103,7 @@ Optional settings go in `data/config.json`, for example:
 | `maxPlaylistItems` | Most videos shown for a playlist |
 | `cookiesFromBrowser` | Use a browser's login (`firefox`); set from Settings. Chrome and Edge don't work on Windows |
 | `updateCheck` | Look for new Ardite versions on GitHub |
+| `ytdlpChannel` | `nightly` for a new yt-dlp every day (fixes for changed sites arrive first); set from Settings. Regular releases (`stable`) by default |
 | `tempFolder` | Where downloads wait on the PC until they're saved, e.g. `"D:\\Ardite"` (Windows' temp folder by default) |
 | `minFreeGB` | Free space a download needs to start (default 2). A running download stops before the disk drops below half of it |
 | `allowedHosts` | Extra names Ardite may be opened with, e.g. `["mypc.tail1234.ts.net"]`. IP addresses, `localhost` and the PC's own name always work; other names are refused so websites can't use Ardite |
@@ -112,7 +113,7 @@ Optional settings go in `data/config.json`, for example:
 
 Requires [Node.js](https://nodejs.org) 20.15 or newer. Download this repository (**Code > Download ZIP**), extract it and double-click `install.bat`.
 
-Run the tests with `node --test` (they also run on every push).
+Run the tests with `node --test` (they also run on every push). They need no internet: a stand-in replaces yt-dlp. The web page tests drive a headless Edge or Chrome and are skipped when neither is installed (`ARDITE_BROWSER` can point to one).
 
 To publish a release, push a tag like `v1.5.0`. GitHub Actions builds `Ardite-win64.zip` with Node.js included, runs the tests and a smoke test on Windows with the packaged app, and only then attaches it to the release.
 

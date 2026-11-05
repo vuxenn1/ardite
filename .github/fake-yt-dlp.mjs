@@ -1,4 +1,4 @@
-// A stand-in for yt-dlp used by test/server.test.js: no internet, the link says what to do.
+// A stand-in for yt-dlp used by the server and browser tests: no internet, the link says what to do.
 //   https://fake.test/<id>?ms=<how long>&size=<file bytes>&total=<bytes it claims>&fail=<error>&flaky=1
 //   https://fake.test/list/<id>?n=<items>   a playlist (with --yes-playlist)
 // It speaks just enough of yt-dlp's language for the server: -J (info), downloads with the
