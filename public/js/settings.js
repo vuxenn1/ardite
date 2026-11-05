@@ -17,7 +17,7 @@ function openSettings() {
 
 // ---------- yt-dlp update (Settings) ----------
 
-let ytdlp = null; // { version, updating, waiting, last, result }
+let ytdlp = null; // { version, channel, updating, waiting, last, result }
 let ytdlpTimer;
 
 async function loadYtdlp() {
@@ -42,9 +42,14 @@ function renderYtdlp() {
   box.hidden = !ytdlp;
   if (!ytdlp) return;
   const busy = ytdlp.updating || ytdlp.waiting;
+  const nightly = ytdlp.channel === 'nightly';
   box.replaceChildren(
-    h('span', {}, h('b', {}, `yt-dlp ${ytdlp.version || ''}`), h('small', {}, ytdlpText())),
-    h('button', { type: 'button', class: 'hist-btn', disabled: busy, onclick: updateYtdlp }, t('ytdlp.check')));
+    h('div', { class: 'row ytdlp-row' },
+      h('span', {}, h('b', {}, `yt-dlp ${ytdlp.version || ''}${nightly ? ' · nightly' : ''}`), h('small', {}, ytdlpText())),
+      h('button', { type: 'button', class: 'hist-btn', disabled: busy, onclick: updateYtdlp }, t('ytdlp.check'))),
+    h('label', { class: 'switch-row' },
+      h('span', {}, h('b', {}, t('ytdlp.nightly')), h('small', {}, t('ytdlp.nightlyDesc'))),
+      h('input', { type: 'checkbox', class: 'switch', checked: nightly, disabled: busy, onchange: (e) => setYtdlpChannel(e.target.checked) })));
   // follow along while it runs
   clearTimeout(ytdlpTimer);
   if (busy && settingsDlg.open) ytdlpTimer = setTimeout(loadYtdlp, 1500);
@@ -53,6 +58,14 @@ function renderYtdlp() {
 async function updateYtdlp() {
   try {
     ytdlp = await api('/api/ytdlp/update', { method: 'POST' });
+  } catch (err) { toast(errText(err)); }
+  renderYtdlp();
+}
+
+// switches between the stable and nightly yt-dlp; the server installs the other one right away
+async function setYtdlpChannel(nightly) {
+  try {
+    ytdlp = await api('/api/ytdlp/channel', { method: 'PUT', body: { channel: nightly ? 'nightly' : 'stable' } });
   } catch (err) { toast(errText(err)); }
   renderYtdlp();
 }

@@ -64,6 +64,26 @@ test('a passing 403 is retried and the download still works', async () => {
   assert.match(s.log(), /transient error, retry 1\/2/);
 });
 
+test('yt-dlp switches to the nightly channel and back to stable', async () => {
+  // (other checks, like the one 5 s after start, may run in between, so only the outcome counts)
+  const settled = (channel, version) => waitFor(async () => {
+    const st = (await s.call('/api/ytdlp')).data;
+    return st.channel === channel && st.version === version && !st.updating && !st.waiting;
+  }, `yt-dlp ${channel}`);
+
+  assert.equal((await s.call('/api/ytdlp/channel', 'PUT', { channel: 'nightly' })).status, 202);
+  await settled('nightly', '2099.01.02.000000');
+  assert.match(s.log(), /Updated yt-dlp to nightly/);
+
+  await s.call('/api/ytdlp/channel', 'PUT', { channel: 'stable' });
+  await settled('stable', '2099.01.01');
+  assert.match(s.log(), /Updated yt-dlp to stable/);
+
+  // anything else means stable
+  await s.call('/api/ytdlp/channel', 'PUT', { channel: 'beta' });
+  await settled('stable', '2099.01.01');
+});
+
 test('a failed download explains why and looks for a yt-dlp update', async () => {
   // a fresh server: its own check 5 s after start hasn't run yet, so this one isn't skipped
   const fresh = await startServer();

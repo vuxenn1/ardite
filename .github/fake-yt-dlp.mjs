@@ -2,7 +2,8 @@
 //   https://fake.test/<id>?ms=<how long>&size=<file bytes>&total=<bytes it claims>&fail=<error>&flaky=1
 //   https://fake.test/list/<id>?n=<items>   a playlist (with --yes-playlist)
 // It speaks just enough of yt-dlp's language for the server: -J (info), downloads with the
-// progress lines Ardite asks for, --version and -U. Every call is noted in FAKE_YTDLP_STATE/calls.log.
+// progress lines Ardite asks for, --version and --update-to stable|nightly@latest.
+// Every call is noted in FAKE_YTDLP_STATE/calls.log.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -22,13 +23,24 @@ const fail = (error) => {
   process.exit(1);
 };
 
+// The channel it's on (stable unless switched), kept between runs like the real .exe does
+const channelFile = STATE && path.join(STATE, 'channel');
+const channel = (channelFile && fs.existsSync(channelFile) && fs.readFileSync(channelFile, 'utf8')) || 'stable';
+const VERSIONS = { stable: '2099.01.01', nightly: '2099.01.02.000000' };
+
 if (has('--version')) {
-  console.log('2099.01.01');
+  console.log(VERSIONS[channel]);
   process.exit(0);
 }
-if (has('-U')) {
+if (has('--update-to')) {
   note('update');
-  console.log('yt-dlp is up to date (fake)');
+  const wanted = value('--update-to').split('@')[0];
+  if (wanted === channel) {
+    console.log(`yt-dlp is up to date (${channel}@${VERSIONS[channel]} from fake)`);
+  } else {
+    if (channelFile) fs.writeFileSync(channelFile, wanted);
+    console.log(`Updated yt-dlp to ${wanted}@${VERSIONS[wanted]} from fake`);
+  }
   process.exit(0);
 }
 

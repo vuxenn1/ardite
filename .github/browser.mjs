@@ -26,7 +26,10 @@ export async function launchBrowser(executable) {
   const port = await freePort();
   const proc = spawn(executable, [
     '--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,
-    '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--window-size=1280,900', 'about:blank',
+    '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--window-size=1280,900',
+    // the browser's own built-in extensions run scripts on every page and sometimes fail there
+    '--disable-extensions', '--disable-component-extensions-with-background-pages',
+    'about:blank',
   ], { stdio: 'ignore' });
   const devtools = `http://127.0.0.1:${port}`;
   await waitFor(() => fetch(`${devtools}/json/version`).then(() => true, () => false), 'the browser to start');
@@ -43,6 +46,8 @@ export async function launchBrowser(executable) {
       let seq = 0;
       const pending = new Map();
       const errors = [];
+      // only the page's own errors count, not those of the browser's extensions (chrome-extension://…)
+      const fromBrowser = (where) => /^(chrome|edge)(-extension)?:\/\//.test(where || '');
       ws.onmessage = (m) => {
         const msg = JSON.parse(m.data);
         if (msg.id && pending.has(msg.id)) {
@@ -51,10 +56,16 @@ export async function launchBrowser(executable) {
           if (msg.error) p.reject(new Error(msg.error.message));
           else p.resolve(msg.result);
         } else if (msg.method === 'Runtime.exceptionThrown') {
+          // with where it happened, e.g. "(/js/settings.js:42)"
           const d = msg.params.exceptionDetails;
-          errors.push(d.exception?.description || d.text);
+          if (fromBrowser(d.url)) return;
+          const where = d.url ? ` (${d.url.replace(/^https?:\/\/[^/]+/, '')}:${d.lineNumber + 1})` : '';
+          errors.push(`${d.exception?.description || d.text}${where}`);
         } else if (msg.method === 'Runtime.consoleAPICalled' && msg.params.type === 'error') {
-          errors.push(msg.params.args.map((a) => a.value ?? a.description).join(' '));
+          const frame = msg.params.stackTrace?.callFrames?.[0];
+          if (fromBrowser(frame?.url)) return;
+          const where = frame ? ` (${frame.url.replace(/^https?:\/\/[^/]+/, '')}:${frame.lineNumber + 1})` : '';
+          errors.push(`console.error: ${msg.params.args.map((a) => a.value ?? a.description).join(' ')}${where}`);
         }
       };
       const send = (method, params = {}) => new Promise((resolve, reject) => {

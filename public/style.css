@@ -608,7 +608,8 @@ legend { padding: 0; margin-bottom: 8px; font-size: 12px; font-weight: 650; colo
 .radio-card span, .switch-row span { display: grid; }
 .radio-card small, .switch-row small { color: var(--muted); font-size: 13px; line-height: 1.4; margin-top: 2px; }
 .switch-row { cursor: pointer; }
-.ytdlp-row[hidden] { display: none; }
+.ytdlp-box { display: grid; gap: 8px; }
+.ytdlp-box[hidden] { display: none; }
 .ytdlp-row > span { display: grid; min-width: 0; }
 .ytdlp-row small { color: var(--muted); font-size: 13px; line-height: 1.4; margin-top: 2px; }
 .ytdlp-row .hist-btn { margin: 0; flex: none; }

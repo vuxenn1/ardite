@@ -49,10 +49,15 @@ async function main() {
     await download(SOURCES.ytdlp, ytdlp, { onProgress: progress('yt-dlp') });
     ok('yt-dlp');
   } else {
-    // yt-dlp checks its own updates against the same checksum list
-    console.log('  yt-dlp already installed, updating...');
+    // yt-dlp checks its own updates against the same checksum list. It follows the channel picked
+    // in Settings (stable or nightly); "@latest" also lets it go back from nightly to stable.
+    let channel = 'stable';
     try {
-      execFileSync(ytdlp, ['-U'], { stdio: 'ignore', timeout: 120000 });
+      if (JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'config.json'), 'utf8').replace(/^﻿/, '')).ytdlpChannel === 'nightly') channel = 'nightly';
+    } catch { /* no settings yet */ }
+    console.log(`  yt-dlp already installed, updating (${channel})...`);
+    try {
+      execFileSync(ytdlp, ['--update-to', `${channel}@latest`], { stdio: 'ignore', timeout: 120000 });
     } catch { /* the current version still works if the update fails */ }
   }
 
