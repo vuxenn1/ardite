@@ -13,7 +13,7 @@ import { createZip, fileCrc32 } from './zip.js';
 import {
   isValidUrl, friendlyError, fail, lastError, shortSide, summarizeVideo, summarizePlaylist,
   videoStats, linkKind, expectedHeight, codecName, parseOptions, parseTrim, fileClock, isNewer,
-  contentDisposition, parseCookiesTxt,
+  contentDisposition, parseCookiesTxt, hostAllowed, originAllowed,
 } from './core.js';
 import { subtitleArgs, findSubFiles, shiftSrt, embedSubs } from './subs.js';
 import { createUpdater, readRelease } from './updater.js';
@@ -39,6 +39,7 @@ const config = {
   cookiesFromBrowser: '', // e.g. "firefox", for sites that require login
   updateCheck: true, // look for new Ardite releases on GitHub
   repo: 'vuxenn1/ardite',
+  allowedHosts: [], // extra names this PC is opened with, e.g. a Tailscale name
   ...readJson(path.join(DATA, 'config.json')),
 };
 if (process.env.PORT) config.port = Number(process.env.PORT);
@@ -989,8 +990,37 @@ function openEvents(req, res, target, snapshot, final) {
   req.on('close', () => target.listeners.delete(res));
 }
 
+// ---------- who may use Ardite ----------
+
+// Names this PC answers to, besides IP addresses and localhost (see hostAllowed in core.js)
+const hostNames = [os.hostname(), ...(Array.isArray(config.allowedHosts) ? config.allowedHosts : [])];
+const loggedHosts = new Set();
+
+// Refuses other websites: a page on another site must not start downloads or read anything here.
+// Returns true when the request was refused (and answered).
+function refuseForeign(req, res) {
+  const host = req.headers.host || '';
+  if (!hostAllowed(host, hostNames)) {
+    if (!loggedHosts.has(host) && loggedHosts.size < 50) {
+      loggedHosts.add(host);
+      log(`refused a request for the address "${host}" (add it to allowedHosts in data/config.json if it's yours)`);
+    }
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end(`Ardite doesn't answer to "${host}". Open it with this PC's IP address instead, `
+      + 'or add this name to "allowedHosts" in data/config.json.');
+    return true;
+  }
+  if (req.method !== 'GET' && req.method !== 'HEAD' && !originAllowed(req.headers.origin, host)) {
+    log(`refused a ${req.method} ${req.url.split('?')[0]} from another website (${req.headers.origin})`);
+    sendJson(res, 403, fail('forbidden', 'Requests from other websites are not allowed.'));
+    return true;
+  }
+  return false;
+}
+
 const server = http.createServer(async (req, res) => {
   const { pathname } = new URL(req.url, 'http://x');
+  if (refuseForeign(req, res)) return;
 
   try {
     if (pathname === '/api/status' && req.method === 'GET') {

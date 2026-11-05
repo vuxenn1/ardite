@@ -3,8 +3,33 @@ import assert from 'node:assert/strict';
 import {
   isValidUrl, friendlyError, lastError, shortSide, summarizeVideo, summarizePlaylist, videoStats,
   linkKind, expectedHeight, codecName, parseOptions, parseTrim, fileClock, isNewer, contentDisposition,
-  parseCookiesTxt,
+  parseCookiesTxt, hostAllowed, originAllowed,
 } from '../core.js';
+
+test('hostAllowed accepts IP addresses, localhost and the PC\'s own names only', () => {
+  const names = ['MyPC', 'mypc.tail1234.ts.net'];
+  for (const host of ['127.0.0.1:7878', 'localhost:7878', 'localhost', '192.168.1.103:7878', '10.0.0.5',
+    '[::1]:7878', '[fe80::1]:7878', 'mypc:7878', 'MYPC.local:7878', 'mypc.lan', 'mypc.home.arpa:7878',
+    'mypc.tail1234.ts.net:7878', 'app.localhost:7878']) {
+    assert.equal(hostAllowed(host, names), true, host);
+  }
+  // other names, e.g. a website's domain pointed at this PC
+  for (const host of ['evil.com:7878', 'mypc.evil.com:7878', 'notmypc.local', 'localhost.evil.com', '', undefined, 'a b']) {
+    assert.equal(hostAllowed(host, names), false, String(host));
+  }
+  assert.equal(hostAllowed('mypc:7878'), false);
+});
+
+test('originAllowed refuses requests sent by other websites', () => {
+  assert.equal(originAllowed(undefined, 'localhost:7878'), true); // scripts and tools send no Origin
+  assert.equal(originAllowed('', 'localhost:7878'), true);
+  assert.equal(originAllowed('http://localhost:7878', 'localhost:7878'), true);
+  assert.equal(originAllowed('http://192.168.1.103:7878', '192.168.1.103:7878'), true);
+  assert.equal(originAllowed('http://MyPC:7878', 'mypc:7878'), true);
+  assert.equal(originAllowed('https://evil.com', 'localhost:7878'), false);
+  assert.equal(originAllowed('http://localhost:9999', 'localhost:7878'), false);
+  assert.equal(originAllowed('null', 'localhost:7878'), false);
+});
 
 test('parseCookiesTxt checks a cookies.txt and counts its cookies', () => {
   const file = [

@@ -1602,7 +1602,8 @@ loadHistory();
 restoreTasks();
 loadStatus();
 
-// Links shared from another app or shortcut: /?url=... starts right away
+// Links shared from another app or shortcut: /?url=... opens the preview. Nothing downloads until
+// the download button is pressed, so a link on some other page can't start a download by itself.
 {
   const params = new URLSearchParams(location.search);
   const shared = extractUrl(params.get('url') || params.get('u') || params.get('text') || '');
@@ -1612,8 +1613,7 @@ loadStatus();
     history.replaceState(null, '', '/');
     input.value = shared;
     updateInputButtons();
-    if (looksLikePlaylist(shared)) loadPreview(shared);
-    else startJob(shared);
+    loadPreview(shared);
   } else if (!isTouch) {
     input.focus();
   }

@@ -1,5 +1,6 @@
 // Pure helpers used by the server: no network, no files, no state.
 // Kept apart from server.js so they can be tested (see test/).
+import { isIP } from 'node:net';
 import { summarizeSubs, parseSubsOption } from './subs.js';
 
 export function isValidUrl(value) {
@@ -221,4 +222,38 @@ export function contentDisposition(name) {
   const ascii = name.normalize('NFKD').replace(/[^\x20-\x7e]/g, '').replace(/["\\]/g, '') || 'download';
   const utf8 = encodeURIComponent(name).replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
   return `attachment; filename="${ascii}"; filename*=UTF-8''${utf8}`;
+}
+
+// Local network names that only this network can answer, e.g. "mypc.local" or "mypc.lan"
+const LOCAL_SUFFIXES = ['.local', '.lan', '.home', '.home.arpa', '.localdomain', '.internal'];
+
+// The Host header must be this PC: an IP address, localhost or the PC's own name.
+// A website can point its own domain name at this PC (DNS rebinding) and then read and use
+// Ardite as if it were its own page; checking the name stops that. IP addresses can't be
+// pointed elsewhere like that, so any IP is fine. `names` holds the PC's name and extra
+// allowed names (allowedHosts in config.json).
+export function hostAllowed(hostHeader, names = []) {
+  let name;
+  try {
+    name = new URL(`http://${hostHeader}`).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (!hostHeader || !name) return false;
+  if (isIP(name.replace(/^\[|\]$/g, ''))) return true;
+  if (name === 'localhost' || name.endsWith('.localhost')) return true;
+  return names.map((n) => String(n).toLowerCase()).some((n) =>
+    n && (name === n || LOCAL_SUFFIXES.some((s) => name === n + s)));
+}
+
+// Browsers send an Origin header with every request that changes something. When it names
+// another site, a page there is trying to use Ardite (start downloads, change settings), so
+// it's refused. No Origin means a script or tool on this PC, not a web page.
+export function originAllowed(origin, hostHeader) {
+  if (origin == null || origin === '') return true;
+  try {
+    return new URL(origin).host.toLowerCase() === String(hostHeader || '').toLowerCase();
+  } catch {
+    return false; // includes "null", sent by sandboxed pages and local files
+  }
 }

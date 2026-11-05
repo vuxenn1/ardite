@@ -3,6 +3,7 @@
 // Usage: node .github/smoke.mjs <app folder> [expected version]
 // The app folder needs bin/yt-dlp(.exe); runtime/node.exe is used when it's there.
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -33,6 +34,15 @@ const get = async (p, init) => {
   const res = await fetch(base + p, init);
   return { status: res.status, type: res.headers.get('content-type') || '', text: await res.text() };
 };
+// fetch() won't send a made-up Host header, so these requests go through http directly
+const raw = (p, method, headers) => new Promise((resolve, reject) => {
+  const req = http.request({ host: '127.0.0.1', port, path: p, method, headers }, (res) => {
+    res.resume();
+    res.on('end', () => resolve(res.statusCode));
+  });
+  req.on('error', reject);
+  req.end(method === 'POST' ? '{}' : undefined);
+});
 
 try {
   // wait for the server to come up
@@ -69,6 +79,12 @@ try {
   check(missing.status === 404 && JSON.parse(missing.text).code === 'jobNotFound', 'unknown download is a 404');
   const escape = await get('/..%2f..%2fserver.js');
   check(escape.status === 403 || escape.status === 404, 'files outside public/ are not served');
+
+  // other websites can't use Ardite
+  check(await raw('/api/history', 'GET', { Host: `evil.example:${port}` }) === 403, 'refuses a foreign address (DNS rebinding)');
+  check(await raw('/api/jobs', 'POST', { Origin: 'https://evil.example', 'Content-Type': 'text/plain' }) === 403,
+    'refuses a download started by another website');
+  check(await raw('/api/info', 'POST', { Origin: base }) === 400, 'accepts its own page');
 } catch (e) {
   failures.push(e.message);
 } finally {
