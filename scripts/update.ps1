@@ -59,7 +59,7 @@ function Copy-Over([string]$From, [string]$To) {
   }
 }
 
-# Release packages list their files in files.txt ("public/app.js" etc.). Only plain relative
+# Release packages list their files in files.txt ("public/js/app.js" etc.). Only plain relative
 # paths count: nothing in data or bin, nothing outside the folder.
 function Read-FileList([string]$Dir) {
   $list = Join-Path $Dir 'files.txt'

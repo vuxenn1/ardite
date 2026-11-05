@@ -33,10 +33,19 @@ test('texts that take values are functions in every language', () => {
   }
 });
 
+// The web UI in parts (public/js/), in the order index.html loads them
+const UI_SCRIPTS = [...read('index.html').matchAll(/<script src="\/(js\/[\w-]+\.js)"/g)].map((m) => m[1]);
+
+test('the page loads every part of the web UI, the starting one last', () => {
+  const parts = fs.readdirSync(new URL('../public/js/', import.meta.url)).filter((f) => f.endsWith('.js')).map((f) => `js/${f}`);
+  assert.deepEqual([...UI_SCRIPTS].sort(), parts.sort());
+  assert.equal(UI_SCRIPTS.at(-1), 'js/app.js');
+});
+
 test('every text the page asks for exists', () => {
   const used = new Set();
-  // t('key') calls in app.js (not other methods that end in "t", like get('key'))
-  for (const m of read('app.js').matchAll(/(?<![\w.$])t\('([\w.-]+)'/g)) used.add(m[1]);
+  // t('key') calls in the web UI (not other methods that end in "t", like get('key'))
+  for (const f of UI_SCRIPTS) for (const m of read(f).matchAll(/(?<![\w.$])t\('([\w.-]+)'/g)) used.add(m[1]);
   // keys built at run time: 'err.' + code, 'phase.' + phase, 'device.' + name
   const html = read('index.html');
   for (const m of html.matchAll(/data-i18n(?:-html)?="([^"]+)"/g)) used.add(m[1]);

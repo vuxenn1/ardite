@@ -257,6 +257,13 @@
 
   <script src="/vendor/qrcode.js" defer></script>
   <script src="/i18n.js" defer></script>
-  <script src="/app.js" defer></script>
+  <!-- the web UI in parts; they run in this order and share one scope -->
+  <script src="/js/base.js" defer></script>
+  <script src="/js/link.js" defer></script>
+  <script src="/js/downloads.js" defer></script>
+  <script src="/js/history.js" defer></script>
+  <script src="/js/settings.js" defer></script>
+  <script src="/js/status.js" defer></script>
+  <script src="/js/app.js" defer></script>
 </body>
 </html>
