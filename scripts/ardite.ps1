@@ -73,9 +73,9 @@ function Stop-Ardite {
   $procId = Get-ArditePid
   if (-not $procId) { Write-Host '  Ardite is not running.'; return }
   Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-  # also stop unfinished downloads
+  # also stop unfinished downloads (only tools in this folder: "\" keeps "ardite-git" next to "ardite" out)
   Get-CimInstance Win32_Process -Filter "Name='yt-dlp.exe' OR Name='ffmpeg.exe'" |
-    Where-Object { $_.ExecutablePath -like "$Root*" } |
+    Where-Object { $_.ExecutablePath -like "$($Root.TrimEnd('\'))\*" } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   Write-Host '  Ardite stopped.'
 }

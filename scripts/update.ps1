@@ -44,9 +44,11 @@ function Start-Ardite {
 }
 
 # Stops Ardite and its tools, but only programs that live in this Ardite folder
+# (the trailing "\" keeps a folder like "ardite-git" next to "ardite" out of it)
 function Stop-Ardite {
+  $inside = $AppDir.TrimEnd('\') + '\'
   Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='yt-dlp.exe' OR Name='ffmpeg.exe' OR Name='ffprobe.exe'" |
-    Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($AppDir, [StringComparison]::OrdinalIgnoreCase) } |
+    Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($inside, [StringComparison]::OrdinalIgnoreCase) } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 
@@ -57,23 +59,20 @@ function Copy-Over([string]$From, [string]$To) {
   }
 }
 
-# Release packages list their files in files.txt ("public/app.js" etc.). data and bin are never in it.
+# Release packages list their files in files.txt ("public/app.js" etc.). Only plain relative
+# paths count: nothing in data or bin, nothing outside the folder.
 function Read-FileList([string]$Dir) {
   $list = Join-Path $Dir 'files.txt'
-  if (-not (Test-Path -LiteralPath $list)) { return $null }
+  if (-not (Test-Path -LiteralPath $list)) { return @() }
   return @(Get-Content -LiteralPath $list | ForEach-Object { $_.Trim() } |
-    Where-Object { $_ -and $_ -notmatch '(^|/)\.\.(/|$)' -and $_ -notmatch '^(data|bin)(/|$)' -and $_ -notmatch '^[/\\]|:' })
+    Where-Object { $_ -and $_ -notmatch '\\|:|^/|(^|/)\.\.?(/|$)' -and $_ -notmatch '^(data|bin)(/|$)' })
 }
 
-# Files the previous version shipped that the new one doesn't: left behind they could confuse
-# the new version (e.g. an old script under a name that's free again)
+# Files the previous version shipped (its files.txt) that the new package doesn't contain: left
+# behind they could confuse the new version. Only files really missing from the new package are
+# picked, so a damaged list can never remove anything the new version needs.
 function Get-StaleFiles {
-  $old = Read-FileList $AppDir
-  $new = Read-FileList $NewDir
-  if ($null -eq $old -or $null -eq $new) { return @() }
-  $keep = @{}
-  foreach ($f in $new) { $keep[$f.ToLowerInvariant()] = $true }
-  return @($old | Where-Object { -not $keep[$_.ToLowerInvariant()] })
+  return @(Read-FileList $AppDir | Where-Object { -not (Test-Path -LiteralPath (Join-Path $NewDir ($_ -replace '/', '\'))) })
 }
 
 function Remove-StaleFiles([string[]]$Stale) {
@@ -108,11 +107,11 @@ try {
 
   # 2. back up exactly what is about to be replaced or removed; data and bin aren't in the package
   # and stay as they are
-  $stale = Get-StaleFiles
+  $stale = @(Get-StaleFiles)
   if (Test-Path $Backup) { Remove-Item $Backup -Recurse -Force }
   New-Item -ItemType Directory -Path $Backup | Out-Null
   $names = @(Get-ChildItem -LiteralPath $NewDir -Force | ForEach-Object { $_.Name })
-  $names += @($stale | ForEach-Object { ($_ -split '/')[0] })
+  $names += $stale | ForEach-Object { ($_ -split '/')[0] }
   foreach ($name in ($names | Sort-Object -Unique)) {
     $current = Join-Path $AppDir $name
     if (Test-Path -LiteralPath $current) { Copy-Item -LiteralPath $current -Destination $Backup -Recurse -Force }

@@ -8,7 +8,10 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { Readable, Transform } from 'node:stream';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 // "release" is GitHub's API answer for the release; GitHub computes a SHA-256 of every file
 // it hosts, which always matches the file. The checksum list ("sums") is only a fallback:
@@ -146,9 +149,9 @@ export async function installFfmpeg(bin, { onProgress, onExtract, canReplace = (
     const zip = path.join(work, 'ffmpeg.zip');
     const sha256 = await download(SOURCES.ffmpeg, zip, { onProgress });
     onExtract?.();
-    // tar.exe that ships with Windows 10+ can extract zip files
+    // tar.exe that ships with Windows 10+ can extract zip files; run without blocking the server
     const tar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
-    execFileSync(tar, ['-xf', zip, '-C', work], { stdio: 'ignore', windowsHide: true });
+    await execFileAsync(tar, ['-xf', zip, '-C', work], { windowsHide: true, timeout: 5 * 60000 });
     const files = ['ffmpeg.exe', 'ffprobe.exe'].map((name) => {
       const src = findFile(work, name);
       if (!src) throw toolError(`${name} not found in the archive`);
