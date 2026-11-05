@@ -3,8 +3,56 @@ import assert from 'node:assert/strict';
 import {
   isValidUrl, friendlyError, lastError, shortSide, summarizeVideo, summarizePlaylist, videoStats,
   linkKind, expectedHeight, codecName, parseOptions, parseTrim, fileClock, isNewer, contentDisposition,
-  parseCookiesTxt, hostAllowed, originAllowed, lowOnSpace,
+  parseCookiesTxt, hostAllowed, originAllowed, lowOnSpace, nextJob,
 } from '../core.js';
+
+test('nextJob: single videos go first and never wait behind a playlist', () => {
+  const A = { name: 'A' };
+  const B = { name: 'B' };
+  const a = (n) => ({ id: `a${n}`, batch: A });
+  const b = (n) => ({ id: `b${n}`, batch: B });
+  const s = (n) => ({ id: `s${n}`, batch: null });
+
+  // a single video goes before older playlist items
+  assert.equal(nextJob([a(1), a(2), s(1)], [], 2).id, 's1');
+  // the playlist fills the slots...
+  assert.equal(nextJob([a(3)], [a(1), a(2)], 2), null);
+  // ...but a single video still starts right away (one extra slot)
+  assert.equal(nextJob([a(3), s(1)], [a(1), a(2)], 2).id, 's1');
+  // only one at a time gets that extra slot
+  assert.equal(nextJob([a(3), s(2)], [a(1), a(2), s(1)], 2), null);
+  // two playlists take turns: the one with fewer running items goes next
+  assert.equal(nextJob([a(2), a(3), b(1), b(2)], [a(1)], 2).id, 'b1');
+  assert.equal(nextJob([a(2), b(2)], [a(1), b(1)], 3).id, 'a2');
+  assert.equal(nextJob([], [], 2), null);
+});
+
+test('nextJob: a playlist started first runs alongside a later single video', () => {
+  const P = {};
+  const queued = Array.from({ length: 5 }, (_, i) => ({ id: `p${i + 1}`, batch: P }));
+  const running = [];
+  const started = [];
+  const pump = () => {
+    for (let j; (j = nextJob(queued, running, 2));) {
+      queued.splice(queued.indexOf(j), 1);
+      running.push(j);
+      started.push(j.id);
+    }
+  };
+  const done = (id) => {
+    running.splice(running.findIndex((j) => j.id === id), 1);
+    pump();
+  };
+  pump();
+  assert.deepEqual(started, ['p1', 'p2']);
+  queued.push({ id: 's1', batch: null }); // sent from a phone meanwhile
+  pump();
+  assert.deepEqual(started, ['p1', 'p2', 's1']);
+  done('p1'); // three still run, so nothing new starts
+  assert.deepEqual(started, ['p1', 'p2', 's1']);
+  done('s1');
+  assert.deepEqual(started, ['p1', 'p2', 's1', 'p3']);
+});
 
 test('lowOnSpace: downloads need the minimum to start and stop at half of it', () => {
   const GB = 1024 ** 3;

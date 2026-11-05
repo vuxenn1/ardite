@@ -98,7 +98,7 @@ Optional settings go in `data/config.json`, for example:
 | Setting | Meaning |
 |---|---|
 | `port` | Address port (`http://localhost:<port>`) |
-| `maxConcurrent` | Downloads running at the same time |
+| `maxConcurrent` | Downloads running at the same time. Single videos go before playlist items, and one may always start even while a playlist fills every slot |
 | `keepFilesMinutes` | How long finished files wait on the PC to be saved |
 | `maxPlaylistItems` | Most videos shown for a playlist |
 | `cookiesFromBrowser` | Use a browser's login (`firefox`); set from Settings. Chrome and Edge don't work on Windows |

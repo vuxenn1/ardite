@@ -13,7 +13,7 @@ import { createZip, fileCrc32 } from './zip.js';
 import {
   isValidUrl, friendlyError, fail, lastError, shortSide, summarizeVideo, summarizePlaylist,
   videoStats, linkKind, expectedHeight, codecName, parseOptions, parseTrim, fileClock, isNewer,
-  contentDisposition, parseCookiesTxt, hostAllowed, originAllowed, lowOnSpace,
+  contentDisposition, parseCookiesTxt, hostAllowed, originAllowed, lowOnSpace, nextJob,
 } from './core.js';
 import { subtitleArgs, findSubFiles, shiftSrt, embedSubs } from './subs.js';
 import { createUpdater, readRelease } from './updater.js';
@@ -192,7 +192,8 @@ async function getInfo(url) {
 const jobs = new Map();
 const batches = new Map();
 const queue = [];
-let running = 0;
+const active = new Set(); // jobs running now
+const idle = () => !active.size && !queue.some((j) => j.status === 'queued');
 
 const isFinal = (status) => status === 'done' || status === 'error' || status === 'canceled';
 
@@ -595,7 +596,7 @@ function deviceOf(req) {
 }
 
 function finish(job) {
-  running--;
+  active.delete(job);
   emit(job, true);
   for (const res of job.listeners) res.end();
   job.listeners.clear();
@@ -639,11 +640,14 @@ function cancelJob(job) {
   else killTree(job.proc); // finish() runs when the process exits
 }
 
+// Starts queued downloads while there's room; see nextJob in core.js for the order
 function pump() {
-  while (running < config.maxConcurrent && queue.length) {
-    const job = queue.shift();
-    if (job.status !== 'queued') continue;
-    running++;
+  for (;;) {
+    for (let i = queue.length - 1; i >= 0; i--) if (queue[i].status !== 'queued') queue.splice(i, 1);
+    const job = nextJob(queue, [...active], config.maxConcurrent);
+    if (!job) return;
+    queue.splice(queue.indexOf(job), 1);
+    active.add(job);
     runJob(job);
   }
 }
@@ -689,8 +693,8 @@ function publicBatch(batch) {
     errorCode: j.error?.code ?? null,
   }));
   const count = (s) => items.filter((i) => i.status === s).length;
-  const active = items.filter((i) => i.status !== 'canceled');
-  const progressSum = active.reduce((n, i) => n + (isFinal(i.status) ? 100 : i.percent || 0), 0);
+  const wanted = items.filter((i) => i.status !== 'canceled');
+  const progressSum = wanted.reduce((n, i) => n + (isFinal(i.status) ? 100 : i.percent || 0), 0);
   return {
     id: batch.id,
     url: batch.url,
@@ -701,7 +705,7 @@ function publicBatch(batch) {
     failed: count('error'),
     canceled: count('canceled'),
     finished: items.every((i) => isFinal(i.status)),
-    percent: active.length ? progressSum / active.length : 100,
+    percent: wanted.length ? progressSum / wanted.length : 100,
     size: items.reduce((n, i) => n + (i.size || 0), 0),
     items,
   };
@@ -836,7 +840,7 @@ const updater = createUpdater({
   feedUrl: UPDATE_FEED,
   log,
   // never restart in the middle of someone's download
-  isBusy: () => running > 0 || queue.some((j) => j.status === 'queued'),
+  isBusy: () => !idle(),
   shutdown: () => shutdown(),
 });
 
@@ -851,7 +855,7 @@ function readVersion() {
 }
 
 function updateYtdlp() {
-  if (running > 0) return;
+  if (active.size) return;
   execFile(YTDLP, ['-U'], { windowsHide: true, timeout: 180000 }, (err, out) => {
     const text = (out || '').trim().split(/\r?\n/).pop();
     if (text) log('yt-dlp update:', text);
@@ -862,7 +866,6 @@ function updateYtdlp() {
 // ---------- ffmpeg update (about once a month, see tools.js) ----------
 
 let ffmpegUpdating = false;
-const idle = () => running === 0 && !queue.some((j) => j.status === 'queued');
 
 async function updateFfmpeg() {
   if (process.platform !== 'win32' || ffmpegUpdating || !idle() || !ffmpegDue(BIN)) return;

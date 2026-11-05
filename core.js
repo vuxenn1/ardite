@@ -264,3 +264,21 @@ export function lowOnSpace(free, min, { starting = false, remaining = 0 } = {}) 
   if (!Number.isFinite(free)) return false; // unknown: don't block anything
   return starting ? free < min : free - Math.max(0, remaining || 0) < min / 2;
 }
+
+// Picks the queued download to start next, or null when none may start yet.
+// queued: waiting jobs, oldest first; running: jobs running now; a job's `batch` is its playlist.
+// - Single videos go before playlist items. One single video may always start, even when
+//   playlists fill every slot, so a link sent from a phone never waits behind a playlist.
+// - Playlists take turns: the one with the fewest running items goes next.
+export function nextJob(queued, running, max) {
+  const single = queued.find((j) => !j.batch);
+  const singlesRunning = running.filter((j) => !j.batch).length;
+  if (single && (running.length < max || singlesRunning === 0)) return single;
+  if (running.length >= max) return null;
+  const busy = (batch) => running.filter((j) => j.batch === batch).length;
+  let best = null;
+  for (const j of queued) {
+    if (j.batch && (!best || busy(j.batch) < busy(best.batch))) best = j;
+  }
+  return best;
+}
