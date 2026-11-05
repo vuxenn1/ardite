@@ -25,7 +25,10 @@ const PUBLIC = path.join(ROOT, 'public');
 const DATA = path.join(ROOT, 'data');
 const BIN = path.join(ROOT, 'bin');
 const EXE = process.platform === 'win32' ? '.exe' : '';
-const YTDLP = path.join(BIN, 'yt-dlp' + EXE);
+// The tests run a stand-in for yt-dlp (a Node script, see .github/fake-yt-dlp.mjs) through ARDITE_YTDLP
+const YTDLP = process.env.ARDITE_YTDLP || path.join(BIN, 'yt-dlp' + EXE);
+// [command, args] for spawn/execFile; a .js/.mjs stand-in runs with this Node
+const ytdlp = (args) => (/\.m?js$/i.test(YTDLP) ? [process.execPath, [YTDLP, ...args]] : [YTDLP, args]);
 const FFPROBE = path.join(BIN, 'ffprobe' + EXE);
 const FFMPEG = path.join(BIN, 'ffmpeg' + EXE);
 const LOG_FILE = path.join(DATA, 'ardite.log');
@@ -207,7 +210,7 @@ async function runInfo(run, url, playlist) {
 function spawnInfo(run, url, playlist) {
   return new Promise((resolve, reject) => {
     const args = [...commonArgs(), '-J', '--flat-playlist', playlist ? '--yes-playlist' : '--no-playlist', '--', url];
-    const proc = spawn(YTDLP, args, { windowsHide: true });
+    const proc = spawn(...ytdlp(args), { windowsHide: true });
     run.proc = proc;
     let out = '';
     let err = '';
@@ -502,7 +505,7 @@ function runJob(job, source = { infoFile: infoCache.get(job.url)?.file }) {
   emit(job, true);
   fs.mkdirSync(job.dir, { recursive: true });
 
-  const proc = spawn(YTDLP, buildArgs(job, source), { windowsHide: true });
+  const proc = spawn(...ytdlp(buildArgs(job, source)), { windowsHide: true });
   job.proc = proc;
   let stderr = '';
   let buffer = '';
@@ -967,7 +970,7 @@ const ytdlpUpdate = { pending: false, promise: null, reason: null, last: 0, resu
 
 function readVersion() {
   return new Promise((resolve) => {
-    execFile(YTDLP, ['--version'], { windowsHide: true }, (err, out) => {
+    execFile(...ytdlp(['--version']), { windowsHide: true }, (err, out) => {
       if (!err) ytdlpVersion = out.trim();
       resolve();
     });
@@ -984,7 +987,7 @@ function maybeUpdateYtdlp() {
   if (!ytdlpUpdate.pending || ytdlpUpdate.promise || active.size || infoRunning) return;
   ytdlpUpdate.pending = false;
   ytdlpUpdate.promise = new Promise((resolve) => {
-    execFile(YTDLP, ['-U'], { windowsHide: true, timeout: 180000 }, (err, out, errOut) => {
+    execFile(...ytdlp(['-U']), { windowsHide: true, timeout: 180000 }, (err, out, errOut) => {
       const text = `${out || ''}\n${errOut || ''}`.trim().split(/\r?\n/).pop() || err?.message || '';
       ytdlpUpdate.result = /^Updated yt-dlp/i.test(text) ? 'updated' : /up to date/i.test(text) ? 'current' : 'failed';
       ytdlpUpdate.last = Date.now();
@@ -1103,7 +1106,7 @@ function saveConfig(patch) {
 function testLogin() {
   return new Promise((resolve) => {
     const args = [...commonArgs(), '--simulate', '--no-playlist', '--', 'https://example.com/'];
-    execFile(YTDLP, args, { windowsHide: true, timeout: 60000 }, (err, stdout, stderr) => {
+    execFile(...ytdlp(args), { windowsHide: true, timeout: 60000 }, (err, stdout, stderr) => {
       const out = `${stdout}\n${stderr}`;
       const extracted = /Extracted (\d+) cookies/.exec(out);
       // only problems with the login count; the page itself has no video, so other errors are expected

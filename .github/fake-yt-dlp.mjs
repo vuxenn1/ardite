@@ -1,0 +1,86 @@
+// A stand-in for yt-dlp used by test/server.test.js: no internet, the link says what to do.
+//   https://fake.test/<id>?ms=<how long>&size=<file bytes>&total=<bytes it claims>&fail=<error>&flaky=1
+//   https://fake.test/list/<id>?n=<items>   a playlist (with --yes-playlist)
+// It speaks just enough of yt-dlp's language for the server: -J (info), downloads with the
+// progress lines Ardite asks for, --version and -U. Every call is noted in FAKE_YTDLP_STATE/calls.log.
+import fs from 'node:fs';
+import path from 'node:path';
+
+const args = process.argv.slice(2);
+const has = (flag) => args.includes(flag);
+const value = (flag) => args[args.indexOf(flag) + 1];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const STATE = process.env.FAKE_YTDLP_STATE;
+const note = (line) => STATE && fs.appendFileSync(path.join(STATE, 'calls.log'), `${Date.now()} ${line}\n`);
+
+const ERRORS = {
+  format: 'Requested format is not available. Use --list-formats for a list of available formats',
+  private: '[youtube] x: Private video. Sign in if you\'ve been granted access to this video',
+};
+const fail = (error) => {
+  process.stderr.write(`ERROR: ${error}\n`);
+  process.exit(1);
+};
+
+if (has('--version')) {
+  console.log('2099.01.01');
+  process.exit(0);
+}
+if (has('-U')) {
+  note('update');
+  console.log('yt-dlp is up to date (fake)');
+  process.exit(0);
+}
+
+const url = new URL(has('--load-info-json')
+  ? JSON.parse(fs.readFileSync(value('--load-info-json'), 'utf8')).webpage_url
+  : args[args.indexOf('--') + 1]);
+const q = (key, fallback) => url.searchParams.get(key) ?? fallback;
+const id = url.pathname.split('/').filter(Boolean).pop() || 'x';
+const title = `Video ${id}`;
+
+// ---------- -J: info for the preview ----------
+if (has('-J')) {
+  note(`info-start ${id}`);
+  await sleep(Number(q('ms', 0)));
+  note(`info-end ${id}`);
+  if (q('fail')) fail(ERRORS[q('fail')] || q('fail'));
+  if (url.pathname.startsWith('/list/') && has('--yes-playlist')) {
+    const entries = Array.from({ length: Number(q('n', 3)) }, (_, i) => ({
+      _type: 'url', id: `${id}-${i + 1}`, title: `Item ${i + 1}`, duration: 60,
+      url: `https://fake.test/${id}-${i + 1}`,
+    }));
+    console.log(JSON.stringify({ _type: 'playlist', id, title: `List ${id}`, extractor_key: 'Fake', entries }));
+  } else {
+    console.log(JSON.stringify({
+      id, title, duration: 60, extractor_key: 'Fake', webpage_url: url.href,
+      formats: [{ format_id: 'v', vcodec: 'avc1.640028', acodec: 'none', width: 1920, height: 1080, fps: 30 }],
+    }));
+  }
+  process.exit(0);
+}
+
+// ---------- a download ----------
+note(`download-start ${id}`);
+
+// flaky=1: the first try gets the 403 YouTube sometimes answers with, the next one works
+const tries = STATE ? path.join(STATE, `tries-${id}`) : null;
+const attempt = tries ? Number(fs.existsSync(tries) ? fs.readFileSync(tries, 'utf8') : 0) + 1 : 1;
+if (tries) fs.writeFileSync(tries, String(attempt));
+if (q('flaky') && attempt === 1) fail('unable to download video data: HTTP Error 403: Forbidden');
+if (q('fail')) fail(ERRORS[q('fail')] || q('fail'));
+
+const size = Number(q('size', 1000));
+const claimed = Number(q('total', size)); // what it says it will download (a lie can test the disk check)
+const ms = Number(q('ms', 0));
+const steps = Math.max(1, Math.round(ms / 100));
+for (let i = 1; i <= steps; i++) {
+  console.log(`ARDITE|${Math.round((claimed * i) / steps)}|${claimed}|NA|1000000|1|avc1.640028|mp4a.40.2`);
+  await sleep(ms / steps);
+}
+
+const out = value('-o').replace(/%\(title\)\.\d+B/, title).replace('%(id)s', id).replace('%(ext)s', 'mp4');
+fs.mkdirSync(path.dirname(out), { recursive: true });
+fs.writeFileSync(out, Buffer.alloc(size, 'v'));
+console.log(`ARDITE_DONE|1920|1080|30|avc1.640028|mp4a.40.2|SDR|${title}`);
+note(`download-end ${id}`);
