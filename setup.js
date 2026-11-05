@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { SOURCES, download, installFfmpeg } from './lib/tools.js';
+import { SOURCES, download, installFfmpeg, removeLeftovers } from './lib/tools.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.join(ROOT, 'bin');
@@ -39,6 +39,10 @@ async function main() {
   fs.mkdirSync(path.join(ROOT, 'data'), { recursive: true });
 
   console.log('\nArdite setup\n');
+
+  // files older versions left behind (see LEFTOVERS in lib/tools.js)
+  const removed = removeLeftovers(ROOT);
+  if (removed.length) console.log(`  Removed files older versions left behind: ${removed.join(', ')}`);
 
   const ytdlp = path.join(BIN, 'yt-dlp.exe');
   if (FORCE || !fs.existsSync(ytdlp)) {

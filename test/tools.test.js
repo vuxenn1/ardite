@@ -5,7 +5,38 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { parseSums, download, ffmpegDue, FFMPEG_MAX_AGE } from '../lib/tools.js';
+import { parseSums, download, ffmpegDue, FFMPEG_MAX_AGE, LEFTOVERS, removeLeftovers } from '../lib/tools.js';
+
+test('removeLeftovers deletes only the files old versions left behind, once lib/ is there', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ardite-tools-'));
+  try {
+    const write = (rel) => {
+      fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+      fs.writeFileSync(path.join(root, rel), 'x');
+    };
+    for (const f of [...LEFTOVERS, 'server.js', 'public/index.html', 'public/js/app.js', 'data/history.json']) write(f);
+
+    // an update that hasn't put lib/ in place yet: nothing is touched
+    assert.deepEqual(removeLeftovers(root), []);
+    assert.ok(fs.existsSync(path.join(root, 'core.js')));
+
+    write('lib/routes.js');
+    write('lib/core.js');
+    assert.deepEqual(removeLeftovers(root).sort(), [...LEFTOVERS].sort());
+    for (const f of LEFTOVERS) assert.ok(!fs.existsSync(path.join(root, f)), `${f} removed`);
+    for (const f of ['server.js', 'public/index.html', 'public/js/app.js', 'data/history.json', 'lib/core.js']) {
+      assert.ok(fs.existsSync(path.join(root, f)), `${f} kept`);
+    }
+    assert.deepEqual(removeLeftovers(root), []); // nothing left to do the second time
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the leftovers list never names a file the current version ships', () => {
+  const repo = new URL('../', import.meta.url);
+  for (const f of LEFTOVERS) assert.ok(!fs.existsSync(new URL(f, repo)), `${f} is still part of Ardite`);
+});
 
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
