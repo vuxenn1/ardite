@@ -27,7 +27,7 @@ async function startServer(config = {}) {
   fs.mkdirSync(path.join(app, 'data'), { recursive: true });
   fs.mkdirSync(state);
   for (const f of fs.readdirSync(REPO)) if (f.endsWith('.js')) fs.copyFileSync(path.join(REPO, f), path.join(app, f));
-  fs.cpSync(path.join(REPO, 'public'), path.join(app, 'public'), { recursive: true });
+  for (const dir of ['lib', 'public']) fs.cpSync(path.join(REPO, dir), path.join(app, dir), { recursive: true });
   fs.copyFileSync(path.join(REPO, 'package.json'), path.join(app, 'package.json'));
   fs.writeFileSync(path.join(app, 'data', 'config.json'), JSON.stringify({ updateCheck: false, ...config }));
 

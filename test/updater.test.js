@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readRelease } from '../updater.js';
+import { readRelease } from '../lib/updater.js';
 
 const sha = 'a'.repeat(64);
 const release = {

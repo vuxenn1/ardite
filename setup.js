@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { SOURCES, download, installFfmpeg } from './tools.js';
+import { SOURCES, download, installFfmpeg } from './lib/tools.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.join(ROOT, 'bin');

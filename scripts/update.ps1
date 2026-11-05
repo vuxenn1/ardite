@@ -114,7 +114,13 @@ try {
   $names += $stale | ForEach-Object { ($_ -split '/')[0] }
   foreach ($name in ($names | Sort-Object -Unique)) {
     $current = Join-Path $AppDir $name
-    if (Test-Path -LiteralPath $current) { Copy-Item -LiteralPath $current -Destination $Backup -Recurse -Force }
+    if (-not (Test-Path -LiteralPath $current)) { continue }
+    # never copy a folder that holds the backup itself: it would copy into itself without end
+    if (($Backup.TrimEnd('\') + '\').StartsWith($current.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+      Write-Log "not backing up $name (the backup is inside it)"
+      continue
+    }
+    Copy-Item -LiteralPath $current -Destination $Backup -Recurse -Force
   }
   Write-Log 'backup done'
 } catch {

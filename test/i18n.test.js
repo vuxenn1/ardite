@@ -50,7 +50,8 @@ test('every text the page asks for exists', () => {
 
 test('every error code and phase the server sends has a text', () => {
   const codes = new Set();
-  for (const f of ['core.js', 'server.js', 'updater.js']) {
+  const lib = fs.readdirSync(new URL('../lib/', import.meta.url)).filter((f) => f.endsWith('.js')).map((f) => `lib/${f}`);
+  for (const f of ['server.js', ...lib]) {
     const src = fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
     for (const m of src.matchAll(/\[\/.*?\/i?, '(\w+)', '/g)) codes.add(`err.${m[1]}`); // friendlyError rules
     for (const m of src.matchAll(/fail\('(\w+)'/g)) codes.add(`err.${m[1]}`);
@@ -63,7 +64,7 @@ test('every error code and phase the server sends has a text', () => {
     // stages read from yt-dlp's log, e.g. [/^\[Merger\]/, 'merging']
     for (const m of src.matchAll(/\[\/\^\\\[[^\n]*?\/, '([a-z-]+)'\]/g)) codes.add(`phase.${m[1]}`);
   }
-  for (const m of fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8').matchAll(/return '(\w+)';/g)) {
+  for (const m of fs.readFileSync(new URL('../lib/network.js', import.meta.url), 'utf8').matchAll(/return '(\w+)';/g)) {
     codes.add(`device.${m[1]}`);
   }
   // make sure the search itself works, so this test can't pass by finding nothing

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
-import { createZip, fileCrc32 } from '../zip.js';
+import { createZip, fileCrc32 } from '../lib/zip.js';
 
 // Reads a stored (uncompressed) ZIP through its central directory, the way unzip tools do
 function readZip(buf) {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { summarizeSubs, parseSubsOption, subtitleArgs, findSubFiles, shiftSrt } from '../subs.js';
+import { summarizeSubs, parseSubsOption, subtitleArgs, findSubFiles, shiftSrt } from '../lib/subs.js';
 
 const SRT = [
   '1', '00:00:00,000 --> 00:00:07,000', 'Before the part', '',

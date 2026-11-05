@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { validPin, hashPin, checkPin, parseCookies, createLimiter, createSessions } from '../auth.js';
+import { validPin, hashPin, checkPin, parseCookies, createLimiter, createSessions } from '../lib/auth.js';
 
 test('validPin wants 4 to 64 characters without control characters', () => {
   for (const pin of ['1234', 'abcd', 'uzun bir şifre', 'x'.repeat(64)]) assert.equal(validPin(pin), true, pin);

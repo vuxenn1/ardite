@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { parseSums, download, ffmpegDue, FFMPEG_MAX_AGE } from '../tools.js';
+import { parseSums, download, ffmpegDue, FFMPEG_MAX_AGE } from '../lib/tools.js';
 
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 

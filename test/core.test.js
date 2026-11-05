@@ -4,7 +4,7 @@ import {
   isValidUrl, friendlyError, lastError, shortSide, summarizeVideo, summarizePlaylist, videoStats,
   linkKind, expectedHeight, codecName, parseOptions, parseTrim, fileClock, isNewer, contentDisposition,
   parseCookiesTxt, hostAllowed, originAllowed, lowOnSpace, nextJob, cleanUrl, siteOf,
-} from '../core.js';
+} from '../lib/core.js';
 
 test('cleanUrl drops tracking parameters but keeps what the link needs', () => {
   const cases = [
