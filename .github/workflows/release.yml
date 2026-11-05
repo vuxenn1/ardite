@@ -46,6 +46,8 @@ jobs:
           cp -r public scripts ./*.js package.json LICENSE README.md ./*.bat "$out/"
           cp node-dist/*/node.exe "$out/runtime/"
           sed -i -E "s/\"version\": \"[^\"]+\"/\"version\": \"${{ steps.version.outputs.version }}\"/" "$out/package.json"
+          # every file in the package, so an update can remove what a newer version no longer has
+          (cd "$out" && find . -type f | sed 's|^\./||' | LC_ALL=C sort > files.txt)
           (cd dist && zip -qr Ardite-win64.zip Ardite)
           ls -lh dist
 

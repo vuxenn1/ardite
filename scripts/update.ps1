@@ -57,6 +57,37 @@ function Copy-Over([string]$From, [string]$To) {
   }
 }
 
+# Release packages list their files in files.txt ("public/app.js" etc.). data and bin are never in it.
+function Read-FileList([string]$Dir) {
+  $list = Join-Path $Dir 'files.txt'
+  if (-not (Test-Path -LiteralPath $list)) { return $null }
+  return @(Get-Content -LiteralPath $list | ForEach-Object { $_.Trim() } |
+    Where-Object { $_ -and $_ -notmatch '(^|/)\.\.(/|$)' -and $_ -notmatch '^(data|bin)(/|$)' -and $_ -notmatch '^[/\\]|:' })
+}
+
+# Files the previous version shipped that the new one doesn't: left behind they could confuse
+# the new version (e.g. an old script under a name that's free again)
+function Get-StaleFiles {
+  $old = Read-FileList $AppDir
+  $new = Read-FileList $NewDir
+  if ($null -eq $old -or $null -eq $new) { return @() }
+  $keep = @{}
+  foreach ($f in $new) { $keep[$f.ToLowerInvariant()] = $true }
+  return @($old | Where-Object { -not $keep[$_.ToLowerInvariant()] })
+}
+
+function Remove-StaleFiles([string[]]$Stale) {
+  foreach ($rel in $Stale) {
+    $path = Join-Path $AppDir ($rel -replace '/', '\')
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+    Remove-Item -LiteralPath $path -Force
+    Write-Log "removed $rel (not part of v$Version)"
+    # and its folder, if that's now empty
+    $dir = Split-Path -Parent $path
+    if ($dir -ne $AppDir -and -not (Get-ChildItem -LiteralPath $dir -Force)) { Remove-Item -LiteralPath $dir -Force }
+  }
+}
+
 function Restore-Backup {
   Write-Log 'putting the previous version back'
   Stop-Ardite
@@ -75,11 +106,15 @@ try {
   Stop-Ardite
   Start-Sleep -Seconds 1
 
-  # 2. back up exactly what is about to be replaced; data and bin aren't in the package and stay as they are
+  # 2. back up exactly what is about to be replaced or removed; data and bin aren't in the package
+  # and stay as they are
+  $stale = Get-StaleFiles
   if (Test-Path $Backup) { Remove-Item $Backup -Recurse -Force }
   New-Item -ItemType Directory -Path $Backup | Out-Null
-  Get-ChildItem -LiteralPath $NewDir -Force | ForEach-Object {
-    $current = Join-Path $AppDir $_.Name
+  $names = @(Get-ChildItem -LiteralPath $NewDir -Force | ForEach-Object { $_.Name })
+  $names += @($stale | ForEach-Object { ($_ -split '/')[0] })
+  foreach ($name in ($names | Sort-Object -Unique)) {
+    $current = Join-Path $AppDir $name
     if (Test-Path -LiteralPath $current) { Copy-Item -LiteralPath $current -Destination $Backup -Recurse -Force }
   }
   Write-Log 'backup done'
@@ -93,6 +128,7 @@ try {
   # 3. new files in
   Copy-Over $NewDir $AppDir
   Write-Log 'new files copied'
+  if ($stale.Count) { Remove-StaleFiles $stale }
 
   # 4. tools: downloads anything a new version needs and updates yt-dlp
   # (in Windows PowerShell, redirected error output of a program would otherwise stop this script)
