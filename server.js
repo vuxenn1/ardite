@@ -13,7 +13,7 @@ import { createZip, fileCrc32 } from './zip.js';
 import {
   isValidUrl, friendlyError, fail, lastError, shortSide, summarizeVideo, summarizePlaylist,
   videoStats, linkKind, expectedHeight, codecName, parseOptions, parseTrim, fileClock, isNewer,
-  contentDisposition, parseCookiesTxt, hostAllowed, originAllowed, lowOnSpace, nextJob,
+  contentDisposition, parseCookiesTxt, hostAllowed, originAllowed, lowOnSpace, nextJob, cleanUrl, siteOf,
 } from './core.js';
 import { subtitleArgs, findSubFiles, shiftSrt, embedSubs } from './subs.js';
 import { createUpdater, readRelease } from './updater.js';
@@ -56,14 +56,29 @@ const HISTORY_MAX = 500;
 
 // ---------- logging ----------
 
+// The log is moved to ardite.old.log once it passes 1 MB (replacing the older one), also while
+// Ardite runs for weeks, so the two together never take more than about 2 MB.
+const LOG_MAX = 1024 * 1024;
+const OLD_LOG = path.join(DATA, 'ardite.old.log');
+let logSize = 0;
 try {
-  if (fs.statSync(LOG_FILE).size > 1024 * 1024) fs.rmSync(LOG_FILE);
+  logSize = fs.statSync(LOG_FILE).size;
 } catch { /* no log yet */ }
 
+function rotateLog() {
+  try {
+    fs.renameSync(LOG_FILE, OLD_LOG); // replaces the previous old log
+  } catch { /* nothing to move */ }
+  logSize = 0;
+}
+if (logSize > LOG_MAX) rotateLog();
+
 function log(...parts) {
-  const line = `[${new Date().toLocaleString('en-GB')}] ${parts.join(' ')}`;
-  console.log(line);
-  fs.appendFile(LOG_FILE, line + '\n', () => {});
+  const line = `[${new Date().toLocaleString('en-GB')}] ${parts.join(' ')}\n`;
+  process.stdout.write(line);
+  logSize += Buffer.byteLength(line);
+  if (logSize > LOG_MAX) rotateLog();
+  fs.appendFile(LOG_FILE, line, () => {});
 }
 
 function readJson(file) {
@@ -635,6 +650,21 @@ async function addSubtitles(job) {
 let history = readJson(HISTORY_FILE);
 if (!Array.isArray(history)) history = [];
 
+// Entries saved by older versions still have tracking parameters and short-link site names
+function tidyHistory() {
+  let changed = false;
+  for (const e of history) {
+    if (!e?.url) continue;
+    const url = cleanUrl(e.url);
+    const site = siteOf(url);
+    if (url !== e.url || site !== e.site) {
+      Object.assign(e, { url, site });
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function saveHistory() {
   try {
     const tmp = HISTORY_FILE + '.tmp';
@@ -646,15 +676,14 @@ function saveHistory() {
 }
 
 function addHistory(entry) {
-  let site = null;
-  try {
-    site = new URL(entry.url).hostname.replace(/^(www|m|mobile|music)\./, '');
-    if (site === 'youtu.be') site = 'youtube.com';
-  } catch { /* keep null */ }
-  history.unshift({ id: crypto.randomBytes(4).toString('hex'), date: Date.now(), site, ...entry });
+  // the link without tracking parameters (the download itself used the original)
+  const url = entry.url ? cleanUrl(entry.url) : entry.url;
+  history.unshift({ id: crypto.randomBytes(4).toString('hex'), date: Date.now(), site: url ? siteOf(url) : null, ...entry, url });
   if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
   saveHistory();
 }
+
+if (tidyHistory()) saveHistory();
 
 // A rough device type from the browser, shown next to each history entry
 function deviceOf(req) {

@@ -3,8 +3,35 @@ import assert from 'node:assert/strict';
 import {
   isValidUrl, friendlyError, lastError, shortSide, summarizeVideo, summarizePlaylist, videoStats,
   linkKind, expectedHeight, codecName, parseOptions, parseTrim, fileClock, isNewer, contentDisposition,
-  parseCookiesTxt, hostAllowed, originAllowed, lowOnSpace, nextJob,
+  parseCookiesTxt, hostAllowed, originAllowed, lowOnSpace, nextJob, cleanUrl, siteOf,
 } from '../core.js';
+
+test('cleanUrl drops tracking parameters but keeps what the link needs', () => {
+  const cases = [
+    ['https://x.com/louismis3/status/2118067720289681430?a=FgAR8LSFaPnmd3-HEaQ&s=19', 'https://x.com/louismis3/status/2118067720289681430'],
+    ['https://www.instagram.com/reel/DfOjEHquCUD/?cplk=OHlwdDZobXhtMzFr', 'https://www.instagram.com/reel/DfOjEHquCUD/'],
+    ['https://www.instagram.com/p/abc/?igsh=MWx0&utm_source=ig', 'https://www.instagram.com/p/abc/'],
+    ['https://www.tiktok.com/@a/video/123?is_from_webapp=1&sender_device=pc', 'https://www.tiktok.com/@a/video/123'],
+    ['https://youtu.be/abc?si=XyZ123', 'https://youtu.be/abc'],
+    ['https://www.youtube.com/watch?v=abc&list=PL1&t=42&si=x&feature=shared&pp=ygU', 'https://www.youtube.com/watch?v=abc&list=PL1&t=42'],
+    ['https://www.youtube.com/watch?v=abc', 'https://www.youtube.com/watch?v=abc'],
+    ['https://www.reddit.com/r/a/comments/b/c/?utm_source=share&utm_medium=web&share_id=1', 'https://www.reddit.com/r/a/comments/b/c/'],
+    ['https://example.com/v?id=7&fbclid=abc', 'https://example.com/v?id=7'],
+  ];
+  for (const [given, want] of cases) assert.equal(cleanUrl(given), want, given);
+  assert.equal(cleanUrl('not a link'), 'not a link');
+});
+
+test('siteOf names the site, short links and mobile addresses included', () => {
+  assert.equal(siteOf('https://vt.tiktok.com/ZSgpULL3C/'), 'tiktok.com');
+  assert.equal(siteOf('https://www.tiktok.com/@a/video/1'), 'tiktok.com');
+  assert.equal(siteOf('https://youtu.be/abc'), 'youtube.com');
+  assert.equal(siteOf('https://m.youtube.com/watch?v=abc'), 'youtube.com');
+  assert.equal(siteOf('https://music.youtube.com/watch?v=abc'), 'youtube.com');
+  assert.equal(siteOf('https://twitter.com/a/status/1'), 'x.com');
+  assert.equal(siteOf('https://www.instagram.com/reel/a/'), 'instagram.com');
+  assert.equal(siteOf('nope'), null);
+});
 
 test('nextJob: single videos go first and never wait behind a playlist', () => {
   const A = { name: 'A' };

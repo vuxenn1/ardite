@@ -282,3 +282,39 @@ export function nextJob(queued, running, max) {
   }
   return best;
 }
+
+// ---------- links kept in the history ----------
+
+// Sites whose video links need nothing after the "?": everything there is sharing/tracking
+const NO_QUERY_SITES = ['instagram.com', 'tiktok.com', 'x.com', 'twitter.com', 'threads.net'];
+// Tracking parameters removed everywhere else (YouTube's v, list and t stay)
+const TRACKING = /^(utm_\w+|fbclid|gclid|dclid|msclkid|mc_cid|mc_eid|igsh|igshid|si|feature|pp|ref_src|ref_url|share_id|rdt|_branch_\w+)$/i;
+
+const onSite = (host, site) => host === site || host.endsWith('.' + site);
+
+// The link without tracking parameters, for the history. Downloads keep using the original.
+export function cleanUrl(value) {
+  let u;
+  try {
+    u = new URL(value);
+  } catch {
+    return value;
+  }
+  const host = u.hostname.toLowerCase();
+  if (NO_QUERY_SITES.some((s) => onSite(host, s))) u.search = '';
+  else for (const key of [...u.searchParams.keys()]) if (TRACKING.test(key)) u.searchParams.delete(key);
+  return u.toString();
+}
+
+// "youtube.com", "tiktok.com"...: the site a link belongs to, short links and mobile hosts included
+export function siteOf(value) {
+  let host;
+  try {
+    host = new URL(value).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  host = host.replace(/^(www|m|mobile|music|vt|vm)\./, '');
+  const aliases = { 'youtu.be': 'youtube.com', 'twitter.com': 'x.com', 'redd.it': 'reddit.com' };
+  return aliases[host] || host;
+}
