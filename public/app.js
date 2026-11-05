@@ -1307,6 +1307,49 @@ function openSettings() {
   settingsDlg.showModal();
   loadLogin();
   loadPin();
+  loadYtdlp();
+}
+
+// ---------- yt-dlp update (Settings) ----------
+
+let ytdlp = null; // { version, updating, waiting, last, result }
+let ytdlpTimer;
+
+async function loadYtdlp() {
+  try {
+    ytdlp = await api('/api/ytdlp');
+  } catch { ytdlp = null; }
+  renderYtdlp();
+}
+
+function ytdlpText() {
+  if (ytdlp.updating) return t('ytdlp.updating');
+  if (ytdlp.waiting) return t('ytdlp.waiting');
+  if (!ytdlp.last) return t('ytdlp.auto');
+  const when = fmtDate.format(ytdlp.last);
+  if (ytdlp.result === 'updated') return t('ytdlp.updated', when);
+  if (ytdlp.result === 'current') return t('ytdlp.current', when);
+  return t('ytdlp.failed', when);
+}
+
+function renderYtdlp() {
+  const box = $('#ytdlpBox');
+  box.hidden = !ytdlp;
+  if (!ytdlp) return;
+  const busy = ytdlp.updating || ytdlp.waiting;
+  box.replaceChildren(
+    h('span', {}, h('b', {}, `yt-dlp ${ytdlp.version || ''}`), h('small', {}, ytdlpText())),
+    h('button', { type: 'button', class: 'hist-btn', disabled: busy, onclick: updateYtdlp }, t('ytdlp.check')));
+  // follow along while it runs
+  clearTimeout(ytdlpTimer);
+  if (busy && settingsDlg.open) ytdlpTimer = setTimeout(loadYtdlp, 1500);
+}
+
+async function updateYtdlp() {
+  try {
+    ytdlp = await api('/api/ytdlp/update', { method: 'POST' });
+  } catch (err) { toast(errText(err)); }
+  renderYtdlp();
 }
 
 $('#settingsBtn').addEventListener('click', openSettings);

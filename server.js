@@ -180,10 +180,12 @@ function fetchInfo(url, playlist, signal) {
 async function runInfo(run, url, playlist) {
   await infoSlot();
   try {
-    if (run.gone) throw canceledError(); // given up while waiting for a slot
+    while (ytdlpUpdate.promise) await ytdlpUpdate.promise; // yt-dlp is replacing itself
+    if (run.gone) throw canceledError(); // given up while waiting
     return await spawnInfo(run, url, playlist);
   } finally {
     freeInfoSlot();
+    maybeUpdateYtdlp();
   }
 }
 
@@ -695,6 +697,10 @@ function finish(job) {
     const keep = job.status === 'done' ? config.keepFilesMinutes * 60000 : 10 * 60000;
     job.cleanup = setTimeout(() => removeJob(job), keep);
   }
+  // a site may have changed: look for a yt-dlp update, at most once an hour
+  if (job.status === 'error' && SITE_CHANGED.has(job.error?.code) && Date.now() - ytdlpUpdate.last > 3600000) {
+    requestYtdlpUpdate('after a failed download');
+  }
   pump();
 }
 
@@ -715,6 +721,10 @@ function cancelJob(job) {
 
 // Starts queued downloads while there's room; see nextJob in core.js for the order
 function pump() {
+  // A yt-dlp update waits for running downloads and goes before queued ones; meanwhile
+  // nothing new starts (the update takes a few seconds, then pump() runs again)
+  if (ytdlpUpdate.pending) maybeUpdateYtdlp();
+  if (ytdlpUpdate.pending || ytdlpUpdate.promise) return;
   for (;;) {
     for (let i = queue.length - 1; i >= 0; i--) if (queue[i].status !== 'queued') queue.splice(i, 1);
     const job = nextJob(queue, [...active], config.maxConcurrent);
@@ -919,22 +929,58 @@ const updater = createUpdater({
 
 // ---------- yt-dlp self-update ----------
 
+// Sites change often, so yt-dlp needs frequent updates. It replaces its own .exe, so the update
+// only runs while nothing uses yt-dlp: one asked for during downloads waits until they're done,
+// and downloads and previews started during the update (a few seconds) wait for it.
+
 let ytdlpVersion = null;
+const ytdlpUpdate = { pending: false, promise: null, reason: null, last: 0, result: null };
 
 function readVersion() {
-  execFile(YTDLP, ['--version'], { windowsHide: true }, (err, out) => {
-    if (!err) ytdlpVersion = out.trim();
+  return new Promise((resolve) => {
+    execFile(YTDLP, ['--version'], { windowsHide: true }, (err, out) => {
+      if (!err) ytdlpVersion = out.trim();
+      resolve();
+    });
   });
 }
 
-function updateYtdlp() {
-  if (active.size) return;
-  execFile(YTDLP, ['-U'], { windowsHide: true, timeout: 180000 }, (err, out) => {
-    const text = (out || '').trim().split(/\r?\n/).pop();
-    if (text) log('yt-dlp update:', text);
-    readVersion();
+function requestYtdlpUpdate(reason) {
+  ytdlpUpdate.pending = true;
+  ytdlpUpdate.reason ??= reason;
+  maybeUpdateYtdlp();
+}
+
+function maybeUpdateYtdlp() {
+  if (!ytdlpUpdate.pending || ytdlpUpdate.promise || active.size || infoRunning) return;
+  ytdlpUpdate.pending = false;
+  ytdlpUpdate.promise = new Promise((resolve) => {
+    execFile(YTDLP, ['-U'], { windowsHide: true, timeout: 180000 }, (err, out, errOut) => {
+      const text = `${out || ''}\n${errOut || ''}`.trim().split(/\r?\n/).pop() || err?.message || '';
+      ytdlpUpdate.result = /^Updated yt-dlp/i.test(text) ? 'updated' : /up to date/i.test(text) ? 'current' : 'failed';
+      ytdlpUpdate.last = Date.now();
+      log(`yt-dlp update${ytdlpUpdate.reason ? ` (${ytdlpUpdate.reason})` : ''}: ${text}`);
+      ytdlpUpdate.reason = null;
+      readVersion().then(resolve);
+    });
+  }).finally(() => {
+    ytdlpUpdate.promise = null;
+    pump(); // downloads that waited for the update
   });
 }
+
+function ytdlpStatus() {
+  return {
+    version: ytdlpVersion,
+    updating: !!ytdlpUpdate.promise,
+    waiting: ytdlpUpdate.pending, // asked for, waiting for downloads to finish
+    last: ytdlpUpdate.last || null,
+    result: ytdlpUpdate.result,
+  };
+}
+
+// Errors that often mean a site changed and yt-dlp needs an update
+const SITE_CHANGED = new Set(['failed', 'noVideo', 'format']);
 
 // ---------- ffmpeg update (about once a month, see tools.js) ----------
 
@@ -1313,6 +1359,12 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ...result, active: status.active });
     }
 
+    if (pathname === '/api/ytdlp' && req.method === 'GET') return sendJson(res, 200, ytdlpStatus());
+    if (pathname === '/api/ytdlp/update' && req.method === 'POST') {
+      requestYtdlpUpdate('asked for in Settings');
+      return sendJson(res, 202, ytdlpStatus());
+    }
+
     if (pathname === '/api/update') {
       if (req.method === 'GET') return sendJson(res, 200, updater.status());
       if (req.method === 'POST') {
@@ -1450,8 +1502,8 @@ server.listen(config.port, config.host, () => {
   log(`Ardite is running at http://localhost:${config.port}`);
   for (const ip of lanAddresses()) log(`  On your phone: http://${ip}:${config.port}`);
   readVersion();
-  setTimeout(updateYtdlp, 5000);
-  setInterval(updateYtdlp, 12 * 60 * 60 * 1000);
+  setTimeout(() => requestYtdlpUpdate('at start'), 5000);
+  setInterval(() => requestYtdlpUpdate('twice a day'), 12 * 60 * 60 * 1000);
   setTimeout(updateFfmpeg, 10 * 60 * 1000);
   setInterval(updateFfmpeg, 12 * 60 * 60 * 1000);
   setTimeout(checkForUpdate, 8000);
