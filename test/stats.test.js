@@ -16,7 +16,7 @@ const RECORDS = [
 
 test('summarize counts downloads, sizes, time and the success rate', () => {
   const s = summarize(RECORDS, NOW);
-  assert.deepEqual(s.total, { downloads: 7, bytes: 3100, seconds: 210, failed: 1, video: 6, audio: 1 });
+  assert.deepEqual(s.total, { downloads: 7, bytes: 3100, seconds: 210, failed: 1, video: 6, audio: 1, gif: 0 });
   assert.equal(s.successRate, 4 / 5);
   assert.equal(s.speed, 100); // 1000 bytes in 10 s; downloads without a time don't count
   assert.deepEqual(s.extras, { trimmed: 1, withSubs: 1, fromPlaylists: 4 });

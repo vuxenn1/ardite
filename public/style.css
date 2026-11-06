@@ -220,7 +220,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .controls { margin-top: 16px; display: grid; gap: 12px; }
 
 .segmented {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;
   padding: 4px;
   background: var(--surface-2);
   border-radius: 15px;
@@ -233,6 +233,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 }
 .segmented button svg { width: 18px; height: 18px; }
 .segmented button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
+.segmented button:disabled { opacity: .4; cursor: not-allowed; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
@@ -264,6 +265,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .trim-row label.end input { text-align: right; }
 .trim-len { flex: none; padding-bottom: 11px; font-size: 13px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
 .trim-precise { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
+.trim-precise[hidden] { display: none; }
 .trim .hint { margin: 0; }
 
 /* two-handle slider: two range inputs on one track, only their handles take the pointer */

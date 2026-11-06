@@ -57,10 +57,29 @@ test('a pasted link shows its preview, quality choices and both modes', { skip, 
   await click(page, '[data-mode="video"]');
 });
 
+test('GIF mode opens a short part by itself and won\'t take a long one', { skip, timeout: STEP }, async () => {
+  await click(page, '[data-mode="gif"]');
+  await page.until(`return !document.querySelector('#trimBox').hidden
+    && document.querySelector('#trimStart').value === '0:00' && document.querySelector('#trimEnd').value === '0:05'`, 'the first 5 seconds');
+  assert.deepEqual(await page.run(`return [...document.querySelectorAll('#opts button')].map((b) => b.textContent)`), ['Small', 'Medium', 'Large']);
+  assert.match(await page.run(`return document.querySelector('#cardGo').textContent`), /^Make GIF · Medium · ✂ 0:05$/);
+  assert.ok(await page.run(`return document.querySelector('.trim-precise').hidden && !document.querySelector('#extras button')`), 'no cut or subtitle buttons');
+  // more than 30 seconds isn't sent
+  await page.run(`const e = document.querySelector('#trimEnd'); e.value = '0:45'; e.dispatchEvent(new Event('input')); return true`);
+  await click(page, '#cardGo');
+  await page.until(`return document.querySelector('#trimEnd').getAttribute('aria-invalid') === 'true'`, 'the too-long part refused');
+  assert.equal(await page.run(`return document.querySelectorAll('#jobs .job').length`), 0);
+  await click(page, '[data-mode="video"]');
+  await page.until(`return document.querySelector('#trimBox').hidden && /^Download/.test(document.querySelector('#cardGo').textContent)`, 'back to video');
+});
+
 test('a download runs to the end, goes into the history and is still there after a reload', { skip, timeout: STEP }, async () => {
   await click(page, '#cardGo');
   await page.until(`return document.querySelectorAll('#jobs .job').length === 1`, 'the download card');
   await page.until(`return /1080p/.test(document.querySelector('#jobs .job').textContent)`, 'the finished download');
+  // it was saved by itself, so the card says so and saving again is the quiet option
+  await page.until(`return /Saved ✓/.test(document.querySelector('#jobs .job .job-status').textContent)
+    && document.querySelector('#jobs .job a').textContent === 'Save again'`, 'the saved state');
   await page.until(historyHas(3), 'the history entry');
   await page.reload();
   await page.until(`return document.querySelectorAll('#jobs .job').length === 1`, 'the card after a reload');

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   isValidUrl, friendlyError, lastError, shortSide, summarizeVideo, summarizePlaylist, videoStats,
   linkKind, expectedHeight, codecName, parseOptions, parseTrim, fileClock, isNewer, contentDisposition,
-  parseCookiesTxt, hostAllowed, originAllowed, lowOnSpace, nextJob, cleanUrl, siteOf,
+  parseCookiesTxt, hostAllowed, originAllowed, lowOnSpace, nextJob, cleanUrl, siteOf, gifTrimOk,
 } from '../lib/core.js';
 
 test('cleanUrl drops tracking parameters but keeps what the link needs', () => {
@@ -265,7 +265,7 @@ test('codecName gives short, familiar names', () => {
 
 test('parseOptions falls back to safe values', () => {
   assert.deepEqual(parseOptions({}), {
-    mode: 'video', quality: 'max', codec: 'h264', audioFormat: 'mp3', trim: null, subs: null,
+    mode: 'video', quality: 'max', codec: 'h264', audioFormat: 'mp3', gifWidth: 480, trim: null, subs: null,
   });
   const o = parseOptions({ mode: 'video', quality: '1080', codec: 'best', subs: { langs: ['tr'], srt: true } });
   assert.equal(o.quality, '1080');
@@ -275,6 +275,21 @@ test('parseOptions falls back to safe values', () => {
   assert.equal(parseOptions({ audioFormat: 'exe' }).audioFormat, 'mp3');
   // no subtitles for audio
   assert.equal(parseOptions({ mode: 'audio', subs: { langs: ['tr'] } }).subs, null);
+});
+
+test('GIF options: three sizes, no subtitles, a short part with an end', () => {
+  const o = parseOptions({ mode: 'gif', gifWidth: '640', subs: { langs: ['tr'] } });
+  assert.equal(o.mode, 'gif');
+  assert.equal(o.gifWidth, 640);
+  assert.equal(o.subs, null);
+  assert.equal(parseOptions({ mode: 'gif', gifWidth: 4000 }).gifWidth, 480);
+  assert.equal(parseOptions({ mode: 'movie' }).mode, 'video');
+
+  assert.equal(gifTrimOk({ start: 10, end: 15 }), true);
+  assert.equal(gifTrimOk({ start: 0, end: 30 }), true);
+  assert.equal(gifTrimOk({ start: 0, end: 31 }), false);
+  assert.equal(gifTrimOk({ start: 5, end: null }), false); // "to the end" could be an hour
+  assert.equal(gifTrimOk(null), false);
 });
 
 test('parseTrim accepts sensible ranges only', () => {

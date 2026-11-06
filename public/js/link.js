@@ -246,6 +246,12 @@ form.addEventListener('submit', async (e) => {
   }
   const trim = readTrim(url);
   if (trim === undefined) return;
+  // a GIF needs a short part (they get big fast)
+  if (settings.mode === 'gif' && !(trim && trim.end != null && trim.end - trim.start <= GIF_MAX_SECONDS)) {
+    trimEndEl.setAttribute('aria-invalid', 'true');
+    trimEndEl.focus();
+    return toast(t('gif.tooLong', GIF_MAX_SECONDS));
+  }
   const subs = readSubs(url);
   if (subs === undefined) return;
   startJob(url, { trim, subs });
@@ -296,6 +302,23 @@ const trimTo = $('#trimTo');
 const trimStartEl = $('#trimStart');
 const trimEndEl = $('#trimEnd');
 const currentDuration = () => (preview?.url && previewVideo(preview.url)?.duration) || 0;
+
+// GIFs: always made from a short part (the server allows up to 30 s), in one of three sizes
+const GIF_MAX_SECONDS = 30;
+const GIF_START_SECONDS = 5; // the part picked at first
+const GIF_SIZES = () => [[320, t('gif.small')], [480, t('gif.medium')], [640, t('gif.large')]];
+const trimShown = () => (trimUI.open || settings.mode === 'gif') && trimAllowed();
+
+// In GIF mode the trim box is always open and starts with the first few seconds
+function prepareGifTrim() {
+  const duration = Math.floor(currentDuration());
+  if (!duration) return;
+  if (!trimStartEl.value && !trimEndEl.value) {
+    trimStartEl.value = fmtClock(0);
+    trimEndEl.value = fmtClock(Math.min(GIF_START_SECONDS, duration));
+  }
+  setupTrimRange();
+}
 
 function trimChip() {
   return h('button', {
@@ -371,7 +394,11 @@ for (const el of [trimStartEl, trimEndEl]) {
 }
 
 function renderTrim() {
-  $('#trimBox').hidden = !(trimUI.open && trimAllowed());
+  $('#trimBox').hidden = !trimShown();
+  // a GIF is always cut exactly, so the choice (and its explanation) isn't offered there;
+  // the GIF hint above says what to do
+  $('.trim-precise').hidden = settings.mode === 'gif';
+  $('#trimHint').hidden = settings.mode === 'gif';
   const duration = currentDuration();
   trimEndEl.placeholder = duration ? fmtClock(duration) : t('trim.endPh');
 }
@@ -379,7 +406,7 @@ function renderTrim() {
 // Returns the trim to send: null for the whole video, undefined if the times are wrong.
 // quiet: only work it out (for the download button's label), without messages.
 function readTrim(url, quiet = false) {
-  if (!trimUI.open || !trimAllowed()) return null;
+  if (!trimShown()) return null;
   const start = parseClock(trimStartEl.value);
   let end = parseClock(trimEndEl.value);
   if (!quiet) {
@@ -399,9 +426,10 @@ function readTrim(url, quiet = false) {
   const duration = previewVideo(url)?.duration;
   if (duration && (start || 0) >= duration) return bad(trimStartEl, t('trim.tooLong', fmtClock(duration)));
   if (duration && end != null && end > duration + 1) return bad(trimEndEl, t('trim.tooLong', fmtClock(duration)));
-  if (duration && end != null && end >= Math.floor(duration)) end = null; // up to the end
+  // up to the end (a GIF keeps its end: the server checks the part's length)
+  if (settings.mode !== 'gif' && duration && end != null && end >= Math.floor(duration)) end = null;
   if (!start && end == null) return null;
-  return { start: start || 0, end, precise: $('#trimPrecise').checked };
+  return { start: start || 0, end, precise: settings.mode === 'gif' || $('#trimPrecise').checked };
 }
 
 function resetTrim() {
@@ -593,14 +621,32 @@ function renderOpts() {
   const box = $('#opts');
   const hint = $('#optsHint');
   hint.hidden = true;
+  // a GIF is made from a part of one video, so not offered for whole playlists
+  $('.segmented [data-mode="gif"]').disabled = !trimAllowed();
+  if (settings.mode === 'gif' && !trimAllowed()) return setMode('video');
+  if (settings.mode === 'gif') prepareGifTrim();
   renderTrim();
   renderSubs();
-  // trimming and subtitles are per video, so they're left out for whole playlists
+  // trimming and subtitles are per video, so they're left out for whole playlists; a GIF's
+  // trim box is always open, so it needs no button
   const extras = [];
-  if (trimAllowed()) extras.push(trimChip());
+  if (trimAllowed() && settings.mode !== 'gif') extras.push(trimChip());
   if (settings.mode === 'video') extras.push(subsChip());
   $('#extras').replaceChildren(...extras);
   $('#cardGo').hidden = !trimAllowed();
+
+  if (settings.mode === 'gif') {
+    $('#optsLabel').textContent = t('opts.size');
+    box.replaceChildren(...GIF_SIZES().map(([w, label]) => chip(label, settings.gifWidth === w, () => {
+      settings.gifWidth = w;
+      saveSettings();
+      renderOpts();
+    })));
+    hint.hidden = false;
+    hint.replaceChildren(t('gif.hint', GIF_MAX_SECONDS));
+    updateGoLabel();
+    return;
+  }
 
   if (settings.mode === 'audio') {
     $('#optsLabel').textContent = t('opts.format');
@@ -635,7 +681,10 @@ function updateGoLabel() {
   const btn = $('#cardGo');
   if (btn.hidden || !preview?.url) return;
   const parts = [t('download')];
-  if (settings.mode === 'audio') {
+  if (settings.mode === 'gif') {
+    parts[0] = t('gif.make');
+    parts.push(GIF_SIZES().find(([w]) => w === settings.gifWidth)?.[1]);
+  } else if (settings.mode === 'audio') {
     parts.push(AUDIO_CHOICES().find(([v]) => v === settings.audioFormat)?.[1]);
   } else {
     const { selected, fps, best } = qualityChoices();
@@ -659,6 +708,7 @@ const currentOptions = () => ({
   quality: settings.quality,
   codec: settings.codec,
   audioFormat: settings.audioFormat,
+  gifWidth: settings.gifWidth,
 });
 
 function clearInput() {

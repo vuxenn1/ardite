@@ -32,6 +32,7 @@ const settings = {
   // PCs get the best quality (4K, 60 fps); phones get H.264, which every phone can play
   codec: isTouch ? 'h264' : 'best',
   audioFormat: 'mp3',
+  gifWidth: 480,
   autoSave: true,
   // remembered subtitle choices; subtitles themselves are off until turned on for a download
   subLangs: [...new Set([lang, 'en'])],
@@ -71,6 +72,7 @@ function icon(name) {
 const ICONS = {
   video: '<rect x="3" y="5" width="13" height="14" rx="2.5"/><path d="M16 10l5-3v10l-5-3"/>',
   audio: '<path d="M9 18V6l11-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+  gif: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M6.5 16l4-4.5 3 3 2-2 2 3.5"/><circle cx="9" cy="8.5" r="1.3"/>',
   list: '<path d="M4 6h11M4 11h11M4 16h7"/><path d="M17 14v6l4-3z"/>',
   save: '<path d="M12 4v12M6.5 10.5 12 16l5.5-5.5M5 20h14"/>',
   zip: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M11 9h1M11 12h1M11 15h1"/>',

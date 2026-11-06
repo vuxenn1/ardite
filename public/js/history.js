@@ -48,6 +48,7 @@ async function copyText(text, within = document.body) {
 function historyQuality(item) {
   if (item.kind === 'playlist') return [t('kind.playlist'), t('files', item.count || 0)].join(' · ');
   if (item.mode === 'audio') return [t('kind.audio'), item.ext?.toUpperCase()].filter(Boolean).join(' · ');
+  if (item.mode === 'gif') return 'GIF';
   return [t('kind.video'), mediaLabel(item.media) || item.ext?.toUpperCase()].filter(Boolean).join(' · ');
 }
 

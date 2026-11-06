@@ -30,6 +30,7 @@
 - **Best quality**: up to 4K/8K and 60 fps, never re-encoded. Each download shows what it really got (e.g. "4K60 · VP9") and warns you if the site handed out a lower quality than usual.
 - **Audio only**: MP3, M4A, OPUS, WAV or the original format, with cover art
 - **Trim**: drag a slider to download only part of a video
+- **GIF**: pick a few seconds and get them as a GIF in three sizes
 - **Subtitles**: pick languages, get them embedded in the video (switch them on or off in your player) or as separate `.srt` files
 - **Playlists**: choose the videos you want and get them as a ZIP
 - **Any device**: scan the QR code on the PC to open Ardite on your phone. Files are saved on whichever device you use.

@@ -101,6 +101,7 @@ function saveTask(task) {
   persistTasks();
   download(`/api/jobs/${task.data.id}/file`);
   saveSrt(task.data);
+  render(task); // shows "Saved"
 }
 
 // .srt files asked for next to the video; spaced out so the browser accepts them all
@@ -130,12 +131,16 @@ function render(task) {
   else renderJob(task);
 }
 
-function jobStatusText(d) {
+// saved: this device already saved the file (by itself or with the button)
+function jobStatusText(d, saved) {
   if (d.status === 'queued') return t('st.queued');
   if (d.status === 'done' && isLowQuality(d)) {
     return t('warn.lowQuality', qualityLabel(String(d.media.height), d.media.fps), qualityLabel(String(d.expected)));
   }
-  if (d.status === 'done') return [t('st.ready'), trimLabel(d.trim), mediaLabel(d.media), subsLabel(d.subs), fmtBytes(d.size)].filter(Boolean).join(' · ');
+  if (d.status === 'done') {
+    const what = d.mode === 'gif' ? 'GIF' : mediaLabel(d.media);
+    return [saved ? `${t('st.saved')} ✓` : t('st.ready'), trimLabel(d.trim), what, subsLabel(d.subs), fmtBytes(d.size)].filter(Boolean).join(' · ');
+  }
   if (d.status === 'error') return errText(d.error, 'st.failed');
   if (d.status === 'canceled') return t('st.canceled');
   const p = d.progress || {};
@@ -170,10 +175,11 @@ function renderJob(task) {
 
   const actions = h('div', { class: 'job-actions' });
   if (d.status === 'done') {
+    // once saved, saving again is a quiet option rather than the main button
     actions.append(h('a', {
-      class: 'primary-btn', href: `/api/jobs/${d.id}/file`, download: '',
-      onclick: () => { task.saved = true; persistTasks(); },
-    }, icon('save'), t('save')));
+      class: task.saved ? 'secondary-btn' : 'primary-btn', href: `/api/jobs/${d.id}/file`, download: '',
+      onclick: () => { task.saved = true; persistTasks(); setTimeout(() => render(task)); },
+    }, icon('save'), t(task.saved ? 'saveAgain' : 'save')));
     if (d.subs?.srt?.length) {
       actions.append(h('button', { type: 'button', class: 'secondary-btn', title: t('subs.saveSrt'), onclick: () => saveSrt(d) }, 'SRT'));
     }
@@ -185,10 +191,10 @@ function renderJob(task) {
 
   task.el.className = `card job ${d.status}${d.status === 'done' && isLowQuality(d) ? ' warn' : ''}`;
   task.el.replaceChildren(h('div', { class: 'job-row' },
-    taskThumb(meta, meta.mode === 'audio' ? 'audio' : 'video'),
+    taskThumb(meta, meta.mode === 'audio' || meta.mode === 'gif' ? meta.mode : 'video'),
     h('div', {},
       h('div', { class: 'job-title', title }, title),
-      h('div', { class: 'job-status', title: d.error?.detail || '' }, jobStatusText(d)),
+      h('div', { class: 'job-status', title: d.error?.detail || '' }, jobStatusText(d, task.saved)),
       h('div', { class: 'bar' + (indeterminate ? ' indeterminate' : '') },
         h('span', { style: `width:${d.status === 'done' ? 100 : percent || 0}%` }))),
     actions));

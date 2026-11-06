@@ -211,3 +211,27 @@ test('statistics start with the downloads already in the history', async () => {
     await old.stop();
   }
 });
+
+test('a trimmed part is counted with its own length, not the whole video\'s', async () => {
+  const j = await start(s, 'https://fake.test/part1', { trim: { start: 10, end: 25 } });
+  assert.equal((await finished(s, j.id)).status, 'done');
+  assert.equal((await s.call('/api/history')).data[0].duration, 15);
+});
+
+test('a GIF needs a short part with an end', async () => {
+  for (const trim of [null, { start: 0, end: 45 }, { start: 5 }]) {
+    const r = await s.call('/api/jobs', 'POST', { url: 'https://fake.test/g0', mode: 'gif', trim });
+    assert.equal(r.status, 400, JSON.stringify(trim));
+    assert.equal(r.data.code, 'gifLength');
+  }
+});
+
+test('a GIF without ffmpeg ends with a clear error (the stand-in makes no real video)', async () => {
+  const j = await start(s, 'https://fake.test/g1', { mode: 'gif', gifWidth: 320, trim: { start: 0, end: 4 } });
+  const done = await finished(s, j.id);
+  assert.equal(done.status, 'error');
+  assert.equal(done.error.code, 'gifFailed');
+  assert.match(s.log(), /new job: gif 320px cut 0-4/);
+  // the stand-in was asked for the picture only, cut exactly
+  assert.ok(s.calls().some((c) => c.what === 'download-start' && c.id === 'g1'));
+});

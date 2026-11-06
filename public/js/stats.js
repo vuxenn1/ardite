@@ -91,7 +91,7 @@ function renderStats() {
   body.replaceChildren(
     s.since && h('p', { class: 'tiny stats-since' }, t('stats.since', fmtDay(s.since))),
     h('div', { class: 'stat-tiles' },
-      tile(t('stats.downloads'), fmtNum(s.total.downloads), t('stats.split', fmtNum(s.total.video), fmtNum(s.total.audio))),
+      tile(t('stats.downloads'), fmtNum(s.total.downloads), t('stats.split', fmtNum(s.total.video), fmtNum(s.total.audio), s.total.gif ? fmtNum(s.total.gif) : 0)),
       tile(t('stats.size'), fmtBytes(s.total.bytes) || '0 B'),
       // downloads from before Ardite counted lengths have none, so 0 means "not known"
       tile(t('stats.length'), s.total.seconds ? fmtLength(s.total.seconds) : '—'),
