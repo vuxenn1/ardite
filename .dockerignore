@@ -1,0 +1,11 @@
+.git
+.github
+data
+bin
+runtime
+dist
+docs
+test
+node_modules
+public/vendor
+*.log

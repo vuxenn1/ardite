@@ -1,7 +1,7 @@
 // Starts a packaged Ardite and checks that it really works. The release workflow runs this
 // before publishing, so a broken package (e.g. a missing file) never reaches anyone.
 // Usage: node .github/smoke.mjs <app folder> [expected version]
-// The app folder needs bin/yt-dlp(.exe); runtime/node.exe is used when it's there.
+// The app folder needs bin/yt-dlp(.exe); runtime/node(.exe) is used when it's there.
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -12,7 +12,7 @@ const appDir = path.resolve(process.argv[2] || '.');
 const expectedVersion = process.argv[3];
 const port = Number(process.env.SMOKE_PORT) || 7990;
 const base = `http://127.0.0.1:${port}`;
-const bundled = path.join(appDir, 'runtime', 'node.exe');
+const bundled = path.join(appDir, 'runtime', process.platform === 'win32' ? 'node.exe' : 'node');
 const node = fs.existsSync(bundled) ? bundled : process.execPath;
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ardite-smoke-'));
 

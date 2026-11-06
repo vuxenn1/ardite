@@ -12,3 +12,6 @@ Thumbs.db
 
 # Node.js bundled into release packages
 runtime/
+
+# Release packages built by .github/build-packages.sh
+dist/

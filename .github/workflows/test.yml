@@ -1,4 +1,4 @@
-# Runs the tests on every push and pull request.
+# Runs the tests on Windows, Linux and macOS on every push and pull request.
 name: Tests
 
 on:
@@ -8,10 +8,18 @@ on:
 
 jobs:
   test:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 24
+      # the tests stand in for another device by connecting from 127.0.0.2, which macOS doesn't have
+      - name: Second loopback address (macOS)
+        if: runner.os == 'macOS'
+        run: sudo ifconfig lo0 alias 127.0.0.2 up
       - run: node --test

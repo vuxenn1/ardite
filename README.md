@@ -53,19 +53,33 @@ This downloads yt-dlp and ffmpeg (each checked against its published SHA-256 has
 
 ### Linux and macOS
 
-Requires [Node.js](https://nodejs.org) 20.15 or newer. Download this repository (**Code > Download ZIP**), extract it somewhere permanent and run in that folder:
+Nothing else to install either. In a terminal, in the folder where Ardite should live:
 
 ```sh
-./ardite install
+curl -fsSL https://github.com/vuxenn1/ardite/releases/latest/download/Ardite-linux-x64.tar.gz | tar -xz
+cd Ardite && ./ardite install
 ```
 
-This downloads yt-dlp and ffmpeg for your system (Linux on x64 and ARM, like a Raspberry Pi), starts Ardite and makes it start at login (a systemd user service on Linux, a LaunchAgent on macOS). On macOS, install ffmpeg with [Homebrew](https://brew.sh) (`brew install ffmpeg`), since there's no verified build to download for it. If phones can't connect on Linux, the command tells you how to open the port in your firewall.
+Use the package for your computer instead of `Ardite-linux-x64` when needed: `Ardite-linux-arm64` (Raspberry Pi and other ARM boards), `Ardite-macos-arm64` (Apple silicon) or `Ardite-macos-x64` (Intel Macs).
+
+This downloads yt-dlp and ffmpeg for your system, starts Ardite and makes it start at login (a systemd user service on Linux, a LaunchAgent on macOS). On macOS, also install ffmpeg with [Homebrew](https://brew.sh) (`brew install ffmpeg`), since there's no verified build to download for it. If phones can't connect on Linux, the command tells you how to open the port in your firewall.
+
+### Docker
+
+For a server or a NAS (x64 and ARM):
+
+```sh
+docker run -d --name ardite --init --network host --restart unless-stopped \
+  -v ardite-data:/app/data ghcr.io/vuxenn1/ardite
+```
+
+yt-dlp and ffmpeg come in the image, and yt-dlp keeps itself up to date. Settings, history and statistics stay in the `ardite-data` volume. `--network host` lets Ardite see the server's own address for the QR code; without it, publish the port with `-p 7878:7878` instead. Add `-e TZ=Europe/Istanbul` (your time zone) for local times in the log. To update, pull the new image and start the container again.
 
 ### Updating
 
 Ardite tells you when a new version is out. Press **Update now**: it downloads the new version, checks it, restarts and the page refreshes by itself. Your settings, history and tools are kept. If the new version doesn't start, the previous one is put back automatically (details in `data/update/update.log`). `ardite update` does the same from the command line.
 
-Updating by hand works too: run `ardite stop` (`stop.bat`), extract the new release over the old folder and run `ardite install` (`install.bat`) again.
+Updating by hand works too: run `ardite stop` (`stop.bat`), extract the new package over the old folder and run `ardite install` (`install.bat`) again.
 
 ## Usage
 
@@ -132,9 +146,9 @@ Optional settings go in `data/config.json`, for example:
 
 Requires [Node.js](https://nodejs.org) 20.15 or newer. Download this repository (**Code > Download ZIP**), extract it and run `ardite install` (on Windows `install.bat`). Updates then come with `git pull` or a new download.
 
-Run the tests with `node --test` (they also run on every push). They need no internet: a stand-in replaces yt-dlp. The web page tests drive a headless Edge or Chrome and are skipped when neither is installed (`ARDITE_BROWSER` can point to one).
+Run the tests with `node --test` (they also run on Windows, Linux and macOS on every push). They need no internet: a stand-in replaces yt-dlp. The web page tests drive a headless Edge or Chrome and are skipped when neither is installed (`ARDITE_BROWSER` can point to one).
 
-To publish a release, push a tag like `v1.5.0`. GitHub Actions builds `Ardite-win64.zip` with Node.js included, runs the tests and a smoke test on Windows with the packaged app, and only then attaches it to the release.
+To publish a release, push a tag like `v1.5.0`. GitHub Actions builds the packages for Windows, Linux and macOS with Node.js included (`.github/build-packages.sh`) and the Docker image, runs the tests, the setup and a smoke test with each package on its own system, and only then publishes them.
 
 </details>
 

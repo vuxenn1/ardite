@@ -1,8 +1,9 @@
-# Builds a ready-to-use Windows package (Node.js included), checks it on Windows and publishes it.
-# - Push a tag like v1.0.0  -> build, check, then create the release with Ardite-win64.zip
-# - Run it by hand (Actions tab > Release > Run workflow) -> build and check only; the package
+# Builds ready-to-use packages (Node.js included) for Windows, Linux and macOS and a Docker image,
+# checks each one on its own system, then publishes them.
+# - Push a tag like v1.0.0  -> build, check, then create the release and push the Docker image
+# - Run it by hand (Actions tab > Release > Run workflow) -> build and check only; the packages
 #   can be downloaded from the run page
-# Nothing is published unless the tests and the smoke test pass on the packaged app.
+# Nothing is published unless every package passes the tests and the smoke test.
 name: Release
 
 on:
@@ -12,12 +13,13 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      NODE_LINE: latest-v24.x # Node.js LTS line bundled into the package
+      NODE_LINE: latest-v24.x # Node.js LTS line bundled into the packages
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -29,68 +31,135 @@ jobs:
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then version="${GITHUB_REF_NAME#v}"; else version="0.0.0-dev"; fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Download portable Node.js
-        run: |
-          base="https://nodejs.org/dist/$NODE_LINE"
-          curl -fsSL "$base/SHASUMS256.txt" -o SHASUMS256.txt
-          file=$(grep -oE 'node-v[0-9.]+-win-x64\.zip' SHASUMS256.txt | head -1)
-          echo "Using $file"
-          curl -fsSL "$base/$file" -o "$file"
-          grep " $file\$" SHASUMS256.txt | sha256sum -c -
-          unzip -q "$file" '*/node.exe' -d node-dist
-
-      - name: Build package
-        run: |
-          out=dist/Ardite
-          mkdir -p "$out/runtime"
-          cp -r public scripts lib ./*.js package.json LICENSE README.md ./*.bat ardite.cmd ardite "$out/"
-          cp node-dist/*/node.exe "$out/runtime/"
-          sed -i -E "s/\"version\": \"[^\"]+\"/\"version\": \"${{ steps.version.outputs.version }}\"/" "$out/package.json"
-          # every file in the package, so an update can remove what a newer version no longer has
-          (cd "$out" && find . -type f | sed 's|^\./||' | LC_ALL=C sort > files.txt)
-          (cd dist && zip -qr Ardite-win64.zip Ardite)
-          ls -lh dist
+      - name: Build packages
+        run: sh .github/build-packages.sh "${{ steps.version.outputs.version }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Ardite-win64
-          path: dist/Ardite-win64.zip
+          name: packages
+          path: dist/Ardite-*
           if-no-files-found: error
 
-  # Runs on Windows with the Node.js from the package, exactly like users get it
+  # Each package on its own system, with its own Node.js, exactly like users get it
   verify:
     needs: build
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, package: Ardite-win64.zip }
+          - { os: ubuntu-latest, package: Ardite-linux-x64.tar.gz }
+          - { os: ubuntu-24.04-arm, package: Ardite-linux-arm64.tar.gz }
+          - { os: macos-latest, package: Ardite-macos-arm64.tar.gz }
+          - { os: macos-15-intel, package: Ardite-macos-x64.tar.gz }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/download-artifact@v4
         with:
-          name: Ardite-win64
+          name: packages
           path: dist
 
+      # the tests stand in for another device by connecting from 127.0.0.2, which macOS doesn't have
+      - name: Second loopback address (macOS)
+        if: runner.os == 'macOS'
+        run: sudo ifconfig lo0 alias 127.0.0.2 up
+
       - name: Unpack
-        run: Expand-Archive dist/Ardite-win64.zip -DestinationPath pkg
+        run: |
+          if [[ "$RUNNER_OS" == Windows ]]; then NODE=pkg/Ardite/runtime/node.exe; else NODE=pkg/Ardite/runtime/node; fi
+          echo "NODE=$NODE" >> "$GITHUB_ENV"
+          mkdir pkg
+          if [[ "${{ matrix.package }}" == *.zip ]]; then
+            pwsh -Command "Expand-Archive dist/${{ matrix.package }} -DestinationPath pkg"
+          else
+            tar -xzf "dist/${{ matrix.package }}" -C pkg
+          fi
+          "$NODE" -p "process.platform + ' ' + process.arch + ', Node.js ' + process.version"
 
       - name: Tests
-        run: pkg/Ardite/runtime/node.exe --test
+        run: '"$NODE" --test'
 
-      - name: Get yt-dlp (the server needs it to start)
-        run: |
-          New-Item -ItemType Directory -Force pkg/Ardite/bin | Out-Null
-          Invoke-WebRequest https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe -OutFile pkg/Ardite/bin/yt-dlp.exe
+      - name: Setup (downloads yt-dlp and ffmpeg for this system)
+        run: '"$NODE" pkg/Ardite/setup.js'
 
       - name: Smoke test (start the packaged app and check it)
-        run: pkg/Ardite/runtime/node.exe .github/smoke.mjs pkg/Ardite ${{ needs.build.outputs.version }}
+        run: '"$NODE" .github/smoke.mjs pkg/Ardite ${{ needs.build.outputs.version }}'
+
+      - name: The ardite command (start, status, stop)
+        env:
+          PORT: '7991'
+        run: |
+          if [[ "$RUNNER_OS" == Windows ]]; then ardite() { cmd //c "pkg\\Ardite\\ardite.cmd" "$@"; }; else ardite() { pkg/Ardite/ardite "$@"; }; fi
+          ardite start
+          ardite status | tee status.txt
+          grep -q 'RUNNING (v${{ needs.build.outputs.version }})' status.txt
+          ardite stop
+
+  # The image for x64 and ARM; the x64 one is started and checked first. Only after the packages
+  # passed, so a tag whose packages fail publishes no image either.
+  docker:
+    needs: [build, verify]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build for a check
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ardite:check
+          build-args: VERSION=${{ needs.build.outputs.version }}
+
+      - name: Check the image
+        run: |
+          docker run -d --name check -p 7878:7878 ardite:check
+          # up, with its version and a working yt-dlp
+          for i in $(seq 1 60); do
+            if curl -fs http://127.0.0.1:7878/api/status > status.json && grep -q '"ytdlp":"[0-9]' status.json; then break; fi
+            sleep 1
+          done
+          docker logs check
+          cat status.json
+          grep -q '"version":"${{ needs.build.outputs.version }}"' status.json
+          grep -q '"ytdlp":"[0-9]' status.json
+          docker stop check
+
+      - name: Sign in to GitHub's container registry
+        if: github.ref_type == 'tag'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build for x64 and ARM (and publish for a tag)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.ref_type == 'tag' }}
+          build-args: VERSION=${{ needs.build.outputs.version }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}
+            ghcr.io/${{ github.repository }}:latest
 
   publish:
-    needs: [build, verify]
+    needs: [build, verify, docker]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Ardite-win64
+          name: packages
           path: dist
 
       - name: Publish release
@@ -101,11 +170,21 @@ jobs:
           cat > notes.md <<'EOF'
           ## Installation
 
-          1. Download **Ardite-win64.zip** below and extract it somewhere permanent (for example your Documents folder).
-          2. Double-click `install.bat` and click **Yes** when Windows asks for firewall permission.
-
           No Node.js installation needed, it's included. yt-dlp and ffmpeg are downloaded during setup.
 
+          **Windows**: download **Ardite-win64.zip** below, extract it somewhere permanent (for example your Documents folder), double-click `install.bat` and click **Yes** when Windows asks for firewall permission.
+
+          **Linux** (x64, or ARM like a Raspberry Pi) and **macOS** (Apple silicon or Intel): pick your package below, or in a terminal:
+
+          ```sh
+          curl -fsSL https://github.com/vuxenn1/ardite/releases/latest/download/Ardite-linux-x64.tar.gz | tar -xz
+          cd Ardite && ./ardite install
+          ```
+
+          (`Ardite-linux-arm64`, `Ardite-macos-arm64`, `Ardite-macos-x64` for the others. On macOS also run `brew install ffmpeg`.)
+
+          **Docker**: `docker run -d --name ardite --init --network host --restart unless-stopped -v ardite-data:/app/data ghcr.io/vuxenn1/ardite`
+
           EOF
-          gh release create "$GITHUB_REF_NAME" dist/Ardite-win64.zip \
+          gh release create "$GITHUB_REF_NAME" dist/Ardite-* \
             --title "Ardite $GITHUB_REF_NAME" --notes-file notes.md --generate-notes
