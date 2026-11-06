@@ -30,6 +30,9 @@
         <button id="phoneBtn" class="icon-btn" type="button" data-i18n-attr="title:phone.btn,aria-label:phone.btn" hidden>
           <svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M10.5 18h3"/></svg>
         </button>
+        <button id="statsBtn" class="icon-btn" type="button" data-i18n-attr="title:stats.title,aria-label:stats.title">
+          <svg viewBox="0 0 24 24"><path d="M4 20h16"/><path d="M7 16v-5M12 16V6M17 16v-8"/></svg>
+        </button>
         <button id="historyBtn" class="icon-btn" type="button" data-i18n-attr="title:history.btn,aria-label:history.btn">
           <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5M12 7.5V12l3 2"/></svg>
         </button>
@@ -179,6 +182,10 @@
             <button type="button" data-lang-val="tr">Türkçe</button>
           </div>
         </div>
+        <label class="row device-row">
+          <span><b data-i18n="set.deviceName"></b><small data-i18n="set.deviceName.desc"></small></span>
+          <input id="deviceName" class="pin-input" maxlength="40" autocomplete="off" spellcheck="false">
+        </label>
         <div id="ytdlpBox" class="ytdlp-box"></div>
       </fieldset>
 
@@ -240,6 +247,20 @@
     </div>
   </dialog>
 
+  <dialog id="statsDlg" class="sheet sheet-wide">
+    <div class="sheet-inner">
+      <div class="sheet-head">
+        <h2 data-i18n="stats.title"></h2>
+        <button id="statsClose" class="icon-btn ghost" type="button" data-i18n-attr="aria-label:close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </div>
+      <div id="statsBody" class="stats"></div>
+      <div class="stats-foot">
+        <a class="hist-btn" href="/api/stats.csv" download data-i18n="stats.csv"></a>
+        <button id="statsReset" class="link-btn" type="button" data-i18n="stats.reset"></button>
+      </div>
+    </div>
+  </dialog>
+
   <!-- Shown to other devices when a PIN is set, until they enter it -->
   <dialog id="lockDlg" class="sheet lock">
     <form id="lockForm" class="sheet-inner center">
@@ -264,6 +285,7 @@
   <script src="/js/history.js" defer></script>
   <script src="/js/settings.js" defer></script>
   <script src="/js/status.js" defer></script>
+  <script src="/js/stats.js" defer></script>
   <script src="/js/app.js" defer></script>
 </body>
 </html>

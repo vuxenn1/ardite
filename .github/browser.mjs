@@ -32,12 +32,13 @@ export async function launchBrowser(executable) {
     'about:blank',
   ], { stdio: 'ignore' });
   const devtools = `http://127.0.0.1:${port}`;
-  await waitFor(() => fetch(`${devtools}/json/version`).then(() => true, () => false), 'the browser to start');
+  // every request has a time limit, so a browser that hangs fails the test instead of stalling it
+  await waitFor(() => fetch(`${devtools}/json/version`, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false), 'the browser to start');
 
   return {
     // Opens a page; JavaScript errors on it are collected in page.errors
     async open(url) {
-      const tab = await (await fetch(`${devtools}/json/new?${url}`, { method: 'PUT' })).json();
+      const tab = await (await fetch(`${devtools}/json/new?${url}`, { method: 'PUT', signal: AbortSignal.timeout(10000) })).json();
       const ws = new WebSocket(tab.webSocketDebuggerUrl);
       await new Promise((resolve, reject) => {
         ws.onopen = resolve;
@@ -70,7 +71,14 @@ export async function launchBrowser(executable) {
       };
       const send = (method, params = {}) => new Promise((resolve, reject) => {
         const id = ++seq;
-        pending.set(id, { resolve, reject });
+        const timer = setTimeout(() => {
+          pending.delete(id);
+          reject(new Error(`the browser didn't answer ${method}`));
+        }, 30000);
+        pending.set(id, {
+          resolve: (v) => (clearTimeout(timer), resolve(v)),
+          reject: (e) => (clearTimeout(timer), reject(e)),
+        });
         ws.send(JSON.stringify({ id, method, params }));
       });
       // runs `body` (the inside of an async function) in the page and returns its result
@@ -96,6 +104,15 @@ export async function launchBrowser(executable) {
         // waits until `body` returns something truthy
         until: (body, what, timeout) => waitFor(() => run(body).catch(() => false), what, timeout),
         reload,
+        // a phone-sized screen and/or the dark theme, e.g. { width: 390, height: 844, dark: true }
+        async emulate({ width = 1280, height = 900, dark = false } = {}) {
+          await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 600 });
+          await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: dark ? 'dark' : 'light' }] });
+        },
+        // a PNG of what the page shows now, for looking at a layout while working on it
+        async screenshot() {
+          return Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64');
+        },
         close: () => ws.close(),
       };
     },

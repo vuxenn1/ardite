@@ -33,7 +33,8 @@
 - **Subtitles**: pick languages, get them embedded in the video (switch them on or off in your player) or as separate `.srt` files
 - **Playlists**: choose the videos you want and get them as a ZIP
 - **Any device**: scan the QR code on the PC to open Ardite on your phone. Files are saved on whichever device you use.
-- **Shared history**: see what was downloaded on every device (titles and links only, never the files)
+- **Shared history**: see what was downloaded on every device and by which one (give each device a name in Settings); titles and links only, never the files
+- **Statistics**: downloads and gigabytes per month, by day and hour, by site, device, quality and format, with a CSV export. Only numbers are kept for them, no titles or links
 - **PIN lock**: optionally keep others on your Wi-Fi out
 - **English and Turkish**, light and dark theme
 

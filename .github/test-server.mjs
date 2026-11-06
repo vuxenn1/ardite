@@ -51,12 +51,13 @@ export async function startServer({ config = {}, history } = {}) {
     env: { ...process.env, PORT: String(port), TEMP: dir, TMP: dir, TMPDIR: dir, ARDITE_YTDLP: FAKE, FAKE_YTDLP_STATE: state },
     stdio: 'ignore',
   });
-  await waitFor(() => fetch(base + '/api/status').then(() => true, () => false), 'the server to start');
+  await waitFor(() => fetch(base + '/api/status', { signal: AbortSignal.timeout(2000) }).then(() => true, () => false), 'the server to start');
 
-  const call = async (p, method = 'GET', body) => {
+  const call = async (p, method = 'GET', body, headers = {}) => {
     const res = await fetch(base + p, {
+      signal: AbortSignal.timeout(30000),
       method,
-      headers: { Origin: base, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { Origin: base, ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers },
       body: body ? JSON.stringify(body) : undefined,
     });
     const type = res.headers.get('content-type') || '';

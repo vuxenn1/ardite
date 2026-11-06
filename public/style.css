@@ -10,6 +10,7 @@
   --text: #15120f;
   --muted: #6b655e;
   --accent: #cf5317;
+  --chart: #cf5317; /* bars in the statistics; checked against the surface in each theme */
   --accent-hover: #b6470f;
   --accent-soft: rgba(207, 83, 23, .09);
   --on-accent: #ffffff;
@@ -33,6 +34,7 @@
     --text: #f2f0ed;
     --muted: #9a958f;
     --accent: #f07a2a;
+    --chart: #e46b22;
     --accent-hover: #ff8b3d;
     --accent-soft: rgba(240, 122, 42, .14);
     --on-accent: #160b03;
@@ -55,6 +57,7 @@
   --text: #f2f0ed;
   --muted: #9a958f;
   --accent: #f07a2a;
+  --chart: #e46b22;
   --accent-hover: #ff8b3d;
   --accent-soft: rgba(240, 122, 42, .14);
   --on-accent: #160b03;
@@ -525,6 +528,45 @@ a.h-title:hover { text-decoration: underline; }
 .lock .pin-input { height: 46px; text-align: center; font-size: 18px; letter-spacing: .15em; }
 .lock .primary-btn { width: 100%; }
 
+/* ---------- statistics window ---------- */
+.stats { overflow: auto; min-height: 0; display: grid; gap: 22px; padding: 2px 10px 4px 2px; } /* room for the scrollbar */
+.stats-since { margin: 0 !important; }
+.stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.stat-tile { display: grid; gap: 2px; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); }
+.stat-tile span { font-size: 12px; font-weight: 600; color: var(--muted); }
+.stat-tile b { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.stat-tile small { font-size: 12px; color: var(--muted); }
+.stat-block h3 { margin: 0 0 10px; font-size: 12px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.stat-block .tiny { margin: 8px 0 0 !important; }
+.stat-pair { display: grid; grid-template-columns: 1fr 1.6fr; gap: 22px; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 22px; }
+
+/* vertical bars: thin, rounded at the data end, 2px apart, on one quiet baseline */
+.cols { display: flex; height: 156px; }
+.col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; cursor: default; }
+.col small { height: 16px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.col-track { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; border-bottom: 1px solid var(--border); }
+.col-track i { display: block; width: min(calc(100% - 2px), 26px); background: var(--chart); border-radius: 4px 4px 0 0; }
+.col:hover .col-track i { filter: brightness(1.12); }
+.col em { height: 16px; margin-top: 5px; font-style: normal; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.col.current em { color: var(--text); font-weight: 650; }
+
+/* horizontal bars with the name and the number written out */
+.rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.rank li { display: grid; grid-template-columns: minmax(0, 9.5em) 1fr auto; align-items: center; gap: 10px; font-size: 13px; }
+.rank-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank-track { height: 10px; border-radius: 0 4px 4px 0; }
+.rank-track i { display: block; height: 100%; min-width: 2px; background: var(--chart); border-radius: 0 4px 4px 0; }
+.rank-value { min-width: 2.5em; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.stats-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.stats-foot .hist-btn { margin: 0; text-decoration: none; }
+
+/* device name in Settings */
+.device-row { cursor: text; }
+.device-row > span { display: grid; min-width: 0; }
+.device-row small { color: var(--muted); font-size: 13px; line-height: 1.4; margin-top: 2px; }
+.device-row .pin-input { flex: 0 1 200px; }
+
 /* ---------- history window ---------- */
 .sheet-wide { width: min(1040px, calc(100vw - 32px)); }
 .sheet-wide .sheet-inner { display: flex; flex-direction: column; max-height: calc(100dvh - 34px); }
@@ -567,6 +609,9 @@ a.h-title:hover { text-decoration: underline; }
 
 /* phones: each download becomes a small card instead of a wide table row */
 @media (max-width: 720px) {
+  .stat-pair { grid-template-columns: 1fr; }
+  .device-row { flex-wrap: wrap; }
+  .device-row .pin-input { flex: 1 1 100%; }
   .hist-table thead { display: none; }
   .hist-table, .hist-table tbody { display: block; }
   /* title, then date, then "quality · size · device", then the buttons on their own line */

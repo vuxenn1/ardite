@@ -163,3 +163,51 @@ test('no download starts without enough free disk space', async () => {
     await tight.stop();
   }
 });
+
+test('a download keeps its length, channel, time taken and the device name in the history', async () => {
+  const name = 'Ayşe\'nin telefonu';
+  const who = { 'X-Ardite-Device': encodeURIComponent(name), 'User-Agent': 'Mozilla/5.0 (Linux; Android 14) Chrome/130' };
+  const j = (await s.call('/api/jobs', 'POST', { url: 'https://fake.test/n1?ms=300', mode: 'video' }, who)).data;
+  assert.equal((await finished(s, j.id)).status, 'done');
+  const entry = (await s.call('/api/history')).data[0];
+  assert.equal(entry.deviceName, name);
+  assert.equal(entry.duration, 60); // 60.4 s, rounded
+  assert.equal(entry.channel, 'Fake channel | with a bar');
+  assert.ok(entry.took >= 300, `took ${entry.took} ms`);
+});
+
+test('statistics count every download, give a CSV and can be reset', async () => {
+  const st = (await s.call('/api/stats')).data;
+  assert.ok(st.total.downloads >= 4, `${st.total.downloads} downloads`);
+  assert.ok(st.total.failed >= 1, 'failed downloads count too');
+  assert.ok(st.devices.some((d) => d.key === 'Ayşe\'nin telefonu'));
+  assert.equal(st.months.length, 12);
+  assert.ok(st.speed > 0);
+
+  const csv = await s.call('/api/stats.csv');
+  assert.match(csv.headers.get('content-type'), /text\/csv/);
+  const text = csv.data.toString('utf8');
+  assert.ok(text.startsWith('﻿date,outcome,'), 'a BOM so Excel reads it as UTF-8');
+  assert.ok(text.split('\r\n').length > st.total.downloads, 'a row per record');
+
+  assert.equal((await s.call('/api/stats', 'DELETE')).status, 200);
+  assert.equal((await s.call('/api/stats')).data.total.downloads, 0);
+  // the history stays
+  assert.ok((await s.call('/api/history')).data.length > 0);
+});
+
+test('statistics start with the downloads already in the history', async () => {
+  const history = [
+    { id: 'a1', date: Date.now() - 86400000, kind: 'video', mode: 'video', site: 'youtube.com', size: 500, media: { height: 1080, codec: 'VP9' }, device: 'pc' },
+    { id: 'b2', date: Date.now(), kind: 'playlist', mode: 'audio', site: 'youtube.com', count: 3, size: 900, device: 'android' },
+  ];
+  const old = await startServer({ history });
+  try {
+    const st = (await old.call('/api/stats')).data;
+    assert.equal(st.total.downloads, 4);
+    assert.equal(st.total.bytes, 1400);
+    assert.deepEqual(st.qualities, [{ key: '1080p', count: 1, bytes: 500 }]);
+  } finally {
+    await old.stop();
+  }
+});

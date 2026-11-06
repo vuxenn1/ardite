@@ -2,8 +2,7 @@
 
 // ---------- phone connection ----------
 
-const isLocalHost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
-// isTouch is defined at the top (it also picks the default video format)
+// isTouch and isLocalHost are defined in base.js
 
 function renderQr(url) {
   for (const el of $$('[data-lan]')) el.textContent = url;

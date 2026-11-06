@@ -9,6 +9,9 @@ let fmtDate = makeDateFormat();
 const fmtDay = (d) => new Intl.DateTimeFormat(locale(), { day: 'numeric', month: 'short', year: 'numeric' }).format(d);
 const fmtTime = (d) => new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit' }).format(d);
 
+// the name the device went by, or its kind for downloads from before device names
+const deviceLabel = (item) => item.deviceName || (item.device ? t('device.' + item.device) : null);
+
 // The history lives on the PC and is shared by all devices: only titles and links, no files.
 // The home page shows the latest few; the full list is a table in its own window.
 const HISTORY_RECENT = 5;
@@ -81,7 +84,7 @@ function renderHistoryTable() {
         extras && h('small', {}, extras)),
       h('td', { class: 'hist-quality' }, historyQuality(item)),
       h('td', { class: 'hist-size' }, fmtBytes(item.size) || '—'),
-      h('td', { class: 'hist-device' }, item.device ? t('device.' + item.device) : '—'),
+      h('td', { class: 'hist-device' }, deviceLabel(item) || '—'),
       h('td', { class: 'hist-actions' },
         copy,
         item.url && h('button', {
@@ -137,7 +140,7 @@ function renderHistory() {
     const isList = item.kind === 'playlist';
     const meta = [
       fmtDate.format(item.date),
-      item.device && t('device.' + item.device),
+      deviceLabel(item),
       trimLabel(item.trim),
       item.subs && subsLabel({ langs: item.subs }),
       item.site,

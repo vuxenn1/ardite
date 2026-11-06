@@ -1,4 +1,4 @@
-// Ardite web UI, part 5: Settings (yt-dlp, logins, PIN, theme, language) and the PIN lock screen.
+// Ardite web UI, part 5: Settings (device name, yt-dlp, logins, PIN, theme, language) and the PIN lock screen.
 
 // ---------- settings ----------
 
@@ -7,6 +7,9 @@ const settingsDlg = $('#settingsDlg');
 function openSettings() {
   for (const r of $$('input[name="codec"]', settingsDlg)) r.checked = r.value === settings.codec;
   $('input[name="autoSave"]', settingsDlg).checked = settings.autoSave;
+  const name = $('#deviceName');
+  name.value = settings.deviceName || '';
+  name.placeholder = autoDeviceName();
   applyTheme();
   markLang();
   settingsDlg.showModal();
@@ -14,6 +17,16 @@ function openSettings() {
   loadPin();
   loadYtdlp();
 }
+
+// This device's name in the history and statistics (empty: the made-up one, shown as placeholder)
+$('#deviceName').addEventListener('input', (e) => {
+  settings.deviceName = e.target.value.trim();
+  saveSettings();
+});
+// Enter would submit the settings form and close it
+$('#deviceName').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') e.preventDefault();
+});
 
 // ---------- yt-dlp update (Settings) ----------
 
@@ -278,6 +291,7 @@ function applyLang() {
   renderFoot();
   renderUpdate();
   renderAbout();
+  renderStats();
 }
 
 for (const b of $$('[data-lang-val]')) {

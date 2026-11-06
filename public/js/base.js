@@ -23,6 +23,8 @@ const store = {
 };
 
 const isTouch = matchMedia('(pointer: coarse)').matches;
+// the page is open on the PC Ardite runs on
+const isLocalHost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 
 const settings = {
   mode: 'video',
@@ -148,10 +150,26 @@ function toast(message) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
 }
 
+// The name this device goes by in the history and statistics: the one typed in Settings, or a
+// made-up one like "Android · Chrome" (browsers don't tell pages the device's real name). The
+// made-up names stay in English so they don't change with the page's language.
+const DEVICE_TYPES = [[/iPhone/, 'iPhone'], [/iPad/, 'iPad'], [/Android/, 'Android'], [/Windows/, 'Windows'], [/Macintosh/, 'Mac'], [/Linux|CrOS/, 'Linux']];
+const BROWSERS = [[/Edg\//, 'Edge'], [/SamsungBrowser/, 'Samsung Internet'], [/OPR\//, 'Opera'], [/Firefox\//, 'Firefox'], [/Chrome\//, 'Chrome'], [/Safari\//, 'Safari']];
+
+function autoDeviceName() {
+  const pick = (list) => list.find(([re]) => re.test(navigator.userAgent))?.[1];
+  return [isLocalHost ? 'PC' : pick(DEVICE_TYPES) || 'Device', pick(BROWSERS)].filter(Boolean).join(' · ');
+}
+const deviceName = () => settings.deviceName?.trim() || autoDeviceName();
+
 async function api(path, options = {}) {
   const res = await fetch(path, {
     ...options,
-    headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: {
+      // URL-encoded: headers can't carry "ş" and the like as they are
+      'X-Ardite-Device': encodeURIComponent(deviceName()),
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+    },
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));

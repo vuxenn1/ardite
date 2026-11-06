@@ -95,4 +95,5 @@ const out = value('-o').replace(/%\(title\)\.\d+B/, title).replace('%(id)s', id)
 fs.mkdirSync(path.dirname(out), { recursive: true });
 fs.writeFileSync(out, Buffer.alloc(size, 'v'));
 console.log(`ARDITE_DONE|1920|1080|30|avc1.640028|mp4a.40.2|SDR|${title}`);
+console.log('ARDITE_META|60.4|Fake|Fake channel | with a bar');
 note(`download-end ${id}`);

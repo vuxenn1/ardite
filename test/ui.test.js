@@ -9,6 +9,8 @@ import { findBrowser, launchBrowser } from '../.github/browser.mjs';
 
 const BROWSER = findBrowser();
 const skip = BROWSER ? false : 'no Edge or Chrome found (set ARDITE_BROWSER to use another one)';
+// each step fails after a minute instead of hanging (slow CI machines need far less)
+const STEP = 60000;
 
 const HISTORY = [
   { id: 'aa11', date: Date.now() - 60000, kind: 'video', mode: 'video', title: 'First video', url: 'https://fake.test/h1', site: 'fake.test', size: 1000, device: 'pc' },
@@ -26,7 +28,7 @@ before(async () => {
   server = await startServer({ history: HISTORY });
   browser = await launchBrowser(BROWSER);
   page = await browser.open(`${server.base}/`);
-});
+}, { timeout: 60000 });
 
 after(async () => {
   page?.close();
@@ -40,13 +42,13 @@ const paste = (p, url) => p.run(`const i = document.querySelector('#url'); i.val
 const historyHas = (n) => `return document.querySelectorAll('#history li:not(.h-more)').length === ${n}`;
 const click = (p, selector) => p.run(`document.querySelector(${JSON.stringify(selector)}).click(); return true`);
 
-test('the page starts: texts, history and status line', { skip }, async () => {
+test('the page starts: texts, history and status line', { skip, timeout: STEP }, async () => {
   await page.until(`return document.querySelector('.hero h1').textContent.trim().length > 5`, 'the texts');
   await page.until(historyHas(2), 'the history');
   await page.until(`return document.querySelector('#aboutLine').textContent.includes('yt-dlp 2099.01.01')`, 'the status line');
 });
 
-test('a pasted link shows its preview, quality choices and both modes', { skip }, async () => {
+test('a pasted link shows its preview, quality choices and both modes', { skip, timeout: STEP }, async () => {
   await paste(page, 'https://fake.test/ui1?size=2000&ms=400');
   await page.until(`return document.querySelector('#preview').textContent.includes('Video ui1')`, 'the preview');
   await page.until(`return document.querySelectorAll('#opts button').length > 1`, 'the quality choices');
@@ -55,7 +57,7 @@ test('a pasted link shows its preview, quality choices and both modes', { skip }
   await click(page, '[data-mode="video"]');
 });
 
-test('a download runs to the end, goes into the history and is still there after a reload', { skip }, async () => {
+test('a download runs to the end, goes into the history and is still there after a reload', { skip, timeout: STEP }, async () => {
   await click(page, '#cardGo');
   await page.until(`return document.querySelectorAll('#jobs .job').length === 1`, 'the download card');
   await page.until(`return /1080p/.test(document.querySelector('#jobs .job').textContent)`, 'the finished download');
@@ -64,7 +66,7 @@ test('a download runs to the end, goes into the history and is still there after
   await page.until(`return document.querySelectorAll('#jobs .job').length === 1`, 'the card after a reload');
 });
 
-test('Settings: yt-dlp update, PIN and login sections, language', { skip }, async () => {
+test('Settings: yt-dlp update, PIN and login sections, language', { skip, timeout: STEP }, async () => {
   await click(page, '#settingsBtn');
   await page.until(`return document.querySelector('#settingsDlg').open && document.querySelector('#ytdlpBox').textContent.includes('2099.01.01')`, 'the yt-dlp row');
   await page.until(`return !!document.querySelector('#pinBox input') && !!document.querySelector('#loginBox button')`, 'the PIN and login sections');
@@ -87,13 +89,13 @@ test('Settings: yt-dlp update, PIN and login sections, language', { skip }, asyn
   await page.run(`document.querySelector('[data-lang-val="en"]').click(); document.querySelector('#settingsDlg').close(); return true`);
 });
 
-test('the history window lists every download', { skip }, async () => {
+test('the history window lists every download', { skip, timeout: STEP }, async () => {
   await click(page, '#historyBtn');
   await page.until(`return document.querySelector('#historyDlg').open && document.querySelectorAll('#histRows tr').length === 3`, 'the history window');
   await click(page, '#historyClose');
 });
 
-test('another device gets the PIN lock screen, and only the right PIN opens it', { skip }, async () => {
+test('another device gets the PIN lock screen, and only the right PIN opens it', { skip, timeout: STEP }, async () => {
   // Requests from 127.0.0.2 don't count as this PC; a browser can't choose that address itself,
   // so it goes through a small relay that connects to Ardite from 127.0.0.2
   const port = await freePort();
@@ -129,6 +131,27 @@ test('another device gets the PIN lock screen, and only the right PIN opens it',
   await phone.until(`return document.querySelectorAll('#jobs .job').length === 1`, 'its download card, back');
 });
 
-test('no JavaScript errors on the pages', { skip }, () => {
+test('a device name typed in Settings goes into the history', { skip, timeout: STEP }, async () => {
+  await click(page, '#settingsBtn');
+  // without a name, one is made up from the device and browser; on this PC it starts with "PC"
+  assert.match(await page.run(`return document.querySelector('#deviceName').placeholder`), /^PC · /);
+  await page.run(`const i = document.querySelector('#deviceName'); i.value = 'Salon PC'; i.dispatchEvent(new Event('input')); document.querySelector('#settingsDlg').close(); return true`);
+  await paste(page, 'https://fake.test/named1?size=900');
+  await page.until(`return document.querySelector('#preview').textContent.includes('Video named1')`, 'the preview');
+  await click(page, '#cardGo');
+  await page.until(`return document.querySelector('#history li')?.textContent.includes('Salon PC')`, 'the name in the history');
+});
+
+test('the statistics window counts the downloads', { skip, timeout: STEP }, async () => {
+  await click(page, '#statsBtn');
+  await page.until(`return document.querySelector('#statsDlg').open && document.querySelectorAll('#statsBody .stat-tile').length === 6`, 'the headline numbers');
+  // 2 from the history it started with, 2 downloaded here, 1 on the other device
+  assert.equal(await page.run(`return document.querySelector('#statsBody .stat-tile b').textContent`), '5');
+  await page.until(`return [...document.querySelectorAll('#statsBody .rank-name')].some((n) => n.textContent === 'Salon PC')`, 'the device name');
+  assert.equal(await page.run(`return document.querySelectorAll('#statsBody .cols').length`), 3); // months, weekdays, hours
+  await click(page, '#statsClose');
+});
+
+test('no JavaScript errors on the pages', { skip, timeout: STEP }, () => {
   assert.deepEqual([...page.errors, ...(phone?.errors || [])], []);
 });

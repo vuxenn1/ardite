@@ -12,6 +12,8 @@ import { infoBusy, dropStaleInfo } from './lib/info.js';
 import { idle, jobsRunning, pump, stopAllJobs } from './lib/jobs.js';
 import { createUpdates } from './lib/updates.js';
 import { createRoutes } from './lib/routes.js';
+import { listHistory } from './lib/history.js';
+import { seedStats } from './lib/stats.js';
 
 if (!fs.existsSync(YTDLP)) {
   console.error('yt-dlp not found. Run the setup first: node setup.js');
@@ -19,6 +21,9 @@ if (!fs.existsSync(YTDLP)) {
 }
 
 // yt-dlp replaces itself only while no download or preview uses it; queued downloads go on afterwards
+// statistics start with the downloads already in the history (only the first time)
+seedStats(listHistory());
+
 useYtdlpHooks({ isFree: () => !jobsRunning() && !infoBusy(), afterUpdate: pump });
 
 const updates = createUpdates({ isIdle: idle, shutdown });
