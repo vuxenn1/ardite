@@ -4,7 +4,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
-import { startServer, freePort, sleep } from '../.github/test-server.mjs';
+import { startServer, freePort, sleep, waitFor } from '../.github/test-server.mjs';
 import { findBrowser, launchBrowser } from '../.github/browser.mjs';
 
 const BROWSER = findBrowser();
@@ -89,8 +89,17 @@ test('Settings: yt-dlp update, PIN and login sections, language', { skip, timeou
   await click(page, '#settingsBtn');
   await page.until(`return document.querySelector('#settingsDlg').open && document.querySelector('#ytdlpBox').textContent.includes('2099.01.01')`, 'the yt-dlp row');
   await page.until(`return !!document.querySelector('#pinBox input') && !!document.querySelector('#loginBox button')`, 'the PIN and login sections');
+  // Ardite checks for a yt-dlp update by itself 5 s after starting, so "Up to date" may already be
+  // there: wait for this check on the server too, then for the page to show it's done
+  const updates = () => server.calls().filter((c) => c.what === 'update').length;
+  const done = updates();
   await click(page, '#ytdlpBox button');
-  await page.until(`return /Up to date/.test(document.querySelector('#ytdlpBox').textContent)`, 'the update result');
+  await waitFor(async () => {
+    const s = (await server.call('/api/ytdlp')).data;
+    return updates() > done && !s.updating && !s.waiting;
+  }, 'the update check');
+  await page.until(`return /Up to date/.test(document.querySelector('#ytdlpBox').textContent)
+    && !document.querySelector('#ytdlpBox input.switch').disabled`, 'the update result');
   // the nightly switch installs the other yt-dlp and shows it; switching back returns to stable
   await click(page, '#ytdlpBox input.switch');
   await page.until(`return document.querySelector('#ytdlpBox').textContent.includes('yt-dlp 2099.01.02.000000 · nightly')
