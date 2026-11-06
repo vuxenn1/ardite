@@ -266,6 +266,14 @@ export async function runUpdate(o) {
   return 1;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// real paths on both sides: on macOS /var is a link to /private/var, and Node reports the latter
+const realPath = (p) => {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+};
+if (process.argv[1] && realPath(process.argv[1]) === realPath(fileURLToPath(import.meta.url))) {
   process.exitCode = await runUpdate(parseArgs(process.argv.slice(2)));
 }
