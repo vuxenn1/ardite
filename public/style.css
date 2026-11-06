@@ -723,3 +723,4 @@ legend { padding: 0; margin-bottom: 8px; font-size: 12px; font-weight: 650; colo
 .secure-open[hidden] { display: none; }
 .secure-go { margin-top: 10px; justify-self: start; align-self: start; }
 #secureBox .qr { margin-top: 12px; }
+.bookmarklet { justify-self: start; cursor: grab; }

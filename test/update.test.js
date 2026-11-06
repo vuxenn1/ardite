@@ -12,7 +12,8 @@ import { freePort, waitFor } from '../.github/test-server.mjs';
 
 const UPDATER = fileURLToPath(new URL('../scripts/update.mjs', import.meta.url));
 
-const remove = (dir) => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+// Windows (its virus scanner) can hold on to just-written files for a few seconds
+const remove = (dir) => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
 const temp = (t, cleanUp = true) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ardite-update-test-'));
   if (cleanUp) t.after(() => remove(dir));

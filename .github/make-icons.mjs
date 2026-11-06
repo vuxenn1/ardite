@@ -3,6 +3,7 @@
 //   icon-192.png, icon-512.png   the icon as it is (see-through corners)
 //   icon-maskable-512.png        full square, the drawing smaller, for Android's own shapes
 //   apple-touch-icon.png         full square, 180 px (iPhone rounds the corners itself)
+//   extension/icons/icon-*.png   the browser extension's icons
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +22,8 @@ const ICONS = [
   ['icon-512.png', 512, svg, true],
   ['icon-maskable-512.png', 512, square(0.7), false],
   ['apple-touch-icon.png', 180, square(0.82), false],
+  // the browser extension (extension/)
+  ...[16, 32, 48, 128].map((n) => [`../extension/icons/icon-${n}.png`, n, svg, true]),
 ];
 
 const browser = await launchBrowser(findBrowser());

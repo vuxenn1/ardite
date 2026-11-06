@@ -182,6 +182,23 @@ test('the statistics window counts the downloads', { skip, timeout: STEP }, asyn
   await click(page, '#statsClose');
 });
 
+test('Settings: a bookmark that sends the page to this Ardite, and the extension', { skip, timeout: STEP }, async () => {
+  await click(page, '#settingsBtn');
+  await page.until(`return document.querySelector('#settingsDlg').open && !document.querySelector('#sendSet').hidden`, 'the send section');
+  assert.equal(await page.run(`return document.querySelector('#sendBox a[download]').getAttribute('href')`), '/ardite-extension.zip');
+  // what the bookmark does on a video page: opens this Ardite with that page's address
+  const opened = await page.run(`const opened = [];
+    const open = window.open;
+    window.open = (url) => opened.push(url);
+    try { eval(decodeURIComponent(document.querySelector('.bookmarklet').getAttribute('href').slice('javascript:'.length))); } finally { window.open = open; }
+    return opened`);
+  assert.deepEqual(opened, [`${server.base}/?url=${encodeURIComponent(`${server.base}/`)}`]);
+  // clicked here instead of dragged, it only says what to do
+  await click(page, '.bookmarklet');
+  await page.until(`return document.querySelector('#toast').classList.contains('show') && /bookmarks bar/.test(document.querySelector('#toast').textContent)`, 'the drag hint');
+  await page.run(`document.querySelector('#settingsDlg').close(); return true`);
+});
+
 test('no JavaScript errors on the pages', { skip, timeout: STEP }, () => {
   assert.deepEqual([...page.errors, ...(phone?.errors || [])], []);
 });

@@ -16,6 +16,7 @@ WORKDIR /app
 COPY package.json server.js setup.js ardite.js ./
 COPY lib lib
 COPY public public
+COPY extension extension
 
 RUN sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" package.json \
   && node setup.js \

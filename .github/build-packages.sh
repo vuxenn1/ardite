@@ -41,7 +41,7 @@ for target in $targets; do
   # Ardite itself: the same files everywhere, plus the launchers for that system
   out="$work/$target/Ardite"
   mkdir -p "$out/runtime" "$out/scripts"
-  cp -r public lib ./*.js package.json LICENSE README.md "$out/"
+  cp -r public lib extension ./*.js package.json LICENSE README.md "$out/"
   rm -rf "$out/public/vendor"
   cp scripts/update.mjs "$out/scripts/"
   cp "$node_dir/LICENSE" "$out/runtime/LICENSE"

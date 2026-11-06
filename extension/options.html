@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 14px system-ui, sans-serif; margin: 16px; min-width: 320px; color: #15120f; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; }
+    input { width: 100%; box-sizing: border-box; padding: 8px 10px; font: inherit; border: 1px solid #ccc; border-radius: 8px; }
+    p { color: #666; margin: 8px 0 12px; }
+    button { font: 600 14px system-ui; padding: 8px 16px; border: 0; border-radius: 8px; background: #cf5317; color: #fff; cursor: pointer; }
+    #saved { margin-left: 10px; color: #1d6bd1; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #1c1c1f; color: #eee; }
+      input { background: #141416; color: #eee; border-color: #333; }
+      p { color: #aaa; }
+    }
+  </style>
+</head>
+<body>
+  <label for="address" data-msg="address"></label>
+  <input id="address" spellcheck="false" autocomplete="off">
+  <p data-msg="addressHelp"></p>
+  <button id="save" data-msg="save"></button><span id="saved" hidden data-msg="saved"></span>
+  <script src="options.js"></script>
+</body>
+</html>

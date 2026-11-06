@@ -1,0 +1,10 @@
+{
+  "name": { "message": "Ardite" },
+  "description": { "message": "İzlediğin videoyu evdeki bilgisayarında çalışan Ardite'ye gönder." },
+  "send": { "message": "Bu sayfayı Ardite'ye gönder" },
+  "menu": { "message": "Ardite ile indir" },
+  "address": { "message": "Ardite adresi" },
+  "addressHelp": { "message": "Ardite'nin bu tarayıcıda açıldığı adres. Örneğin çalıştığı bilgisayarda http://localhost:7878, başka bir bilgisayarda http://192.168.1.20:7878." },
+  "save": { "message": "Kaydet" },
+  "saved": { "message": "Kaydedildi" }
+}

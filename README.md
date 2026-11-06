@@ -38,6 +38,7 @@
 - **Statistics**: downloads and gigabytes per month, by day and hour, by site, device, quality and format, with a CSV export. Only numbers are kept for them, no titles or links
 - **PIN lock**: optionally keep others on your Wi-Fi out
 - **Works like an app**: install it on the phone's home screen; on Android, share a link from YouTube or any other app straight to Ardite
+- **Send from the browser**: a bookmark button or a small extension sends the video page you're on to Ardite
 - **HTTPS**: an encrypted address for phones, with Ardite's own certificate (set up once per phone, nothing to buy or sign up for)
 - **English and Turkish**, light and dark theme
 
@@ -106,6 +107,13 @@ Ardite is managed with the `ardite` command in its folder (`ardite.cmd` on Windo
 ### PIN lock
 
 By default anyone on your Wi-Fi can open Ardite. To keep others out, set a PIN in **Settings > PIN lock**. Each phone or other device asks for it once and then remembers it; changing the PIN signs them all out. The computer Ardite runs on never asks, so a forgotten PIN can simply be changed there.
+
+### Send from the browser
+
+On a computer, **Settings > Send from your browser** has two ways to send the page you're watching to Ardite. Either way Ardite opens with the video ready; nothing downloads until you press the button.
+
+- **Send to Ardite** button: drag it to the bookmarks bar, then click it on any video page. Works in every browser.
+- **Extension** for Chrome and Edge: a toolbar button and **Download with Ardite** when you right-click a link. Download it there (it comes set to your Ardite's address), unzip it, open `chrome://extensions` (`edge://extensions` in Edge), turn on **Developer mode**, click **Load unpacked** and pick the `ardite-extension` folder. It can only see the page or link you send it.
 
 ### Secure connection (HTTPS)
 

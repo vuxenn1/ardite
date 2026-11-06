@@ -18,6 +18,26 @@ function openSettings() {
   loadYtdlp();
   renderSecure();
   renderApp();
+  renderSend();
+}
+
+// ---------- send from the browser (computers only) ----------
+
+// A bookmark that opens Ardite with the page it's clicked on, and the extension for Chrome and Edge
+function renderSend() {
+  $('#sendSet').hidden = isTouch;
+  if (isTouch) return;
+  const bookmarklet = `javascript:(()=>{window.open(${JSON.stringify(location.origin + '/?url=')}+encodeURIComponent(location.href),'_blank')})()`;
+  $('#sendBox').replaceChildren(
+    h('p', { class: 'login-status' }, t('send.desc')),
+    h('a', {
+      class: 'primary-btn bookmarklet', href: bookmarklet, draggable: 'true',
+      // clicked here instead of dragged: there's no video page to send
+      onclick: (e) => { e.preventDefault(); toast(t('send.dragMe')); },
+    }, t('send.bookmark')),
+    h('p', { class: 'tiny login-help' }, t('send.bookmarkHelp')),
+    h('a', { class: 'secondary-btn secure-go', href: '/ardite-extension.zip', download: '' }, t('send.extension')),
+    h('p', { class: 'tiny login-help' }, t('send.extensionHelp')));
 }
 
 // ---------- use it like an app (install) ----------

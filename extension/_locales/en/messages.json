@@ -1,0 +1,10 @@
+{
+  "name": { "message": "Ardite" },
+  "description": { "message": "Send the video you're watching to Ardite, the downloader on your home computer." },
+  "send": { "message": "Send this page to Ardite" },
+  "menu": { "message": "Download with Ardite" },
+  "address": { "message": "Ardite address" },
+  "addressHelp": { "message": "Where Ardite opens in this browser, e.g. http://localhost:7878 on the computer it runs on or http://192.168.1.20:7878 on another one." },
+  "save": { "message": "Save" },
+  "saved": { "message": "Saved" }
+}

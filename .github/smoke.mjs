@@ -101,6 +101,15 @@ try {
   check(/"name":"Ardite"/.test(secure), `answers on https:// with that certificate (${secure.slice(0, 60)})`);
   check((await get('/secure')).status === 200, 'serves the HTTPS setup page');
 
+  // the browser extension, as a ZIP set to this address
+  const ext = await new Promise((resolve, reject) => http.get(`${base}/ardite-extension.zip`, (res) => {
+    const chunks = [];
+    res.on('data', (c) => chunks.push(c));
+    res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks) }));
+  }).on('error', reject));
+  check(ext.status === 200 && ext.body.includes('ardite-extension/manifest.json') && ext.body.includes(`"address": "${base}"`),
+    'serves the browser extension with this address in it');
+
   // other websites can't use Ardite
   check((await raw('/api/history', 'GET', { Host: `evil.example:${port}` })).status === 403, 'refuses a foreign address (DNS rebinding)');
   check((await raw('/api/jobs', 'POST', { Origin: 'https://evil.example', 'Content-Type': 'text/plain' })).status === 403,

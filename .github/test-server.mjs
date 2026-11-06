@@ -39,19 +39,34 @@ export async function startServer({ config = {}, history } = {}) {
   fs.mkdirSync(path.join(app, 'data'), { recursive: true });
   fs.mkdirSync(state);
   for (const f of fs.readdirSync(REPO)) if (f.endsWith('.js')) fs.copyFileSync(path.join(REPO, f), path.join(app, f));
-  for (const d of ['lib', 'public']) fs.cpSync(path.join(REPO, d), path.join(app, d), { recursive: true });
+  for (const d of ['lib', 'public', 'extension']) fs.cpSync(path.join(REPO, d), path.join(app, d), { recursive: true });
   fs.copyFileSync(path.join(REPO, 'package.json'), path.join(app, 'package.json'));
   fs.writeFileSync(path.join(app, 'data', 'config.json'), JSON.stringify({ updateCheck: false, ...config }));
   if (history) fs.writeFileSync(path.join(app, 'data', 'history.json'), JSON.stringify(history));
 
-  const port = await freePort();
-  const base = `http://127.0.0.1:${port}`;
-  const proc = spawn(process.execPath, ['server.js'], {
-    cwd: app,
-    env: { ...process.env, PORT: String(port), TEMP: dir, TMP: dir, TMPDIR: dir, ARDITE_YTDLP: FAKE, FAKE_YTDLP_STATE: state },
-    stdio: 'ignore',
-  });
-  await waitFor(() => fetch(base + '/api/status', { signal: AbortSignal.timeout(2000) }).then(() => true, () => false), 'the server to start');
+  // Test files run side by side, so now and then two of them pick the same free port and the
+  // second server stops at once ("port in use"): then it's started again on another one.
+  let port;
+  let base;
+  let proc;
+  let output = '';
+  for (let attempt = 1; ; attempt++) {
+    port = await freePort();
+    base = `http://127.0.0.1:${port}`;
+    output = '';
+    proc = spawn(process.execPath, ['server.js'], {
+      cwd: app,
+      env: { ...process.env, PORT: String(port), TEMP: dir, TMP: dir, TMPDIR: dir, ARDITE_YTDLP: FAKE, FAKE_YTDLP_STATE: state },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    proc.stdout.on('data', (d) => (output += d));
+    proc.stderr.on('data', (d) => (output += d));
+    const up = await waitFor(async () => (proc.exitCode !== null ? 'stopped'
+      : fetch(base + '/api/status', { signal: AbortSignal.timeout(2000) }).then(() => 'up', () => false)), 'the server to start', 30000)
+      .catch((e) => { throw new Error(`${e.message}. Its output:\n${output}`); });
+    if (up === 'up') break;
+    if (attempt === 3) throw new Error(`the test server stopped right away. Its output:\n${output}`);
+  }
 
   const call = async (p, method = 'GET', body, headers = {}) => {
     const res = await fetch(base + p, {
