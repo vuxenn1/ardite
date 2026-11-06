@@ -57,6 +57,20 @@ test('canceling a download stops yt-dlp', async () => {
   assert.ok(!s.calls().some((c) => c.what === 'download-end' && c.id === 'c1'), 'the stand-in was stopped before it finished');
 });
 
+test('a canceled download stays canceled while yt-dlp still prints progress on its way out', async () => {
+  // yt-dlp takes a moment to stop; a progress line in that moment used to mark the job as running
+  // again, and it then ended as an error. A fast download prints such lines all the time.
+  for (let i = 0; i < 4; i++) {
+    const j = await start(s, `https://fake.test/race${i}?ms=6000&chatty=1`);
+    await waitFor(() => s.calls().some((c) => c.what === 'download-start' && c.id === `race${i}`), 'the download to start');
+    await sleep(40);
+    await s.call(`/api/jobs/${j.id}`, 'DELETE');
+    // the job reads "canceled" at once; what counts is how it ends once yt-dlp has really stopped
+    await sleep(800);
+    assert.equal((await job(s, j.id)).status, 'canceled', `try ${i + 1}`);
+  }
+});
+
 test('a passing 403 is retried and the download still works', async () => {
   const j = await start(s, 'https://fake.test/r1?flaky=1');
   assert.equal((await finished(s, j.id)).status, 'done');

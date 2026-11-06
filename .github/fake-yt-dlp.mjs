@@ -1,5 +1,6 @@
 // A stand-in for yt-dlp used by the server and browser tests: no internet, the link says what to do.
 //   https://fake.test/<id>?ms=<how long>&size=<file bytes>&total=<bytes it claims>&fail=<error>&flaky=1
+//                         &chatty=1 (a progress line every few milliseconds, like a fast download)
 //   https://fake.test/list/<id>?n=<items>   a playlist (with --yes-playlist)
 // It speaks just enough of yt-dlp's language for the server: -J (info), downloads with the
 // progress lines Ardite asks for, --version and --update-to stable|nightly@latest.
@@ -85,9 +86,13 @@ if (q('fail')) fail(ERRORS[q('fail')] || q('fail'));
 const size = Number(q('size', 1000));
 const claimed = Number(q('total', size)); // what it says it will download (a lie can test the disk check)
 const ms = Number(q('ms', 0));
-const steps = Math.max(1, Math.round(ms / 100));
+// chatty: a burst of lines every 5 ms, so lines keep arriving while the server stops the program
+const chatty = !!q('chatty');
+const steps = Math.max(1, Math.round(ms / (chatty ? 5 : 100)));
+const burst = chatty ? 20 : 1;
 for (let i = 1; i <= steps; i++) {
-  console.log(`ARDITE|${Math.round((claimed * i) / steps)}|${claimed}|NA|1000000|1|avc1.640028|mp4a.40.2`);
+  const line = `ARDITE|${Math.round((claimed * i) / steps)}|${claimed}|NA|1000000|1|avc1.640028|mp4a.40.2\n`;
+  process.stdout.write(line.repeat(burst));
   await sleep(ms / steps);
 }
 
