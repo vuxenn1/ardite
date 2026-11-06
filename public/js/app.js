@@ -9,6 +9,8 @@ updateInputButtons();
 loadHistory();
 restoreTasks();
 loadStatus();
+// lets phones install Ardite as an app (and get it in the Share menu on Android); needs https://
+if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
 // Links shared from another app or shortcut: /?url=... opens the preview. Nothing downloads until
 // the download button is pressed, so a link on some other page can't start a download by itself.

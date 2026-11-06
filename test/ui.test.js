@@ -92,6 +92,8 @@ test('Settings: yt-dlp update, PIN and login sections, language', { skip, timeou
   // Ardite checks for a yt-dlp update by itself 5 s after starting, so "Up to date" may already be
   // there: wait for this check on the server too, then for the page to show it's done
   const updates = () => server.calls().filter((c) => c.what === 'update').length;
+  // while that check runs, the button is disabled and a click would do nothing
+  await page.until(`return !document.querySelector('#ytdlpBox button').disabled`, 'the check button');
   const done = updates();
   await click(page, '#ytdlpBox button');
   await waitFor(async () => {

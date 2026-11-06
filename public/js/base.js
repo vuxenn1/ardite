@@ -158,9 +158,16 @@ function toast(message) {
 const DEVICE_TYPES = [[/iPhone/, 'iPhone'], [/iPad/, 'iPad'], [/Android/, 'Android'], [/Windows/, 'Windows'], [/Macintosh/, 'Mac'], [/Linux|CrOS/, 'Linux']];
 const BROWSERS = [[/Edg\//, 'Edge'], [/SamsungBrowser/, 'Samsung Internet'], [/OPR\//, 'Opera'], [/Firefox\//, 'Firefox'], [/Chrome\//, 'Chrome'], [/Safari\//, 'Safari']];
 
+// Chrome on Android tells the phone's model ("Pixel 7"), but only to pages on https:// (see /secure).
+// It's kept, so the name stays the same on http:// too.
+let deviceModel = store.get('deviceModel', '');
+navigator.userAgentData?.getHighEntropyValues?.(['model']).then(({ model }) => {
+  if (model && model !== deviceModel) store.set('deviceModel', deviceModel = model);
+}).catch(() => {});
+
 function autoDeviceName() {
   const pick = (list) => list.find(([re]) => re.test(navigator.userAgent))?.[1];
-  return [isLocalHost ? 'PC' : pick(DEVICE_TYPES) || 'Device', pick(BROWSERS)].filter(Boolean).join(' · ');
+  return [isLocalHost ? 'PC' : deviceModel || pick(DEVICE_TYPES) || 'Device', pick(BROWSERS)].filter(Boolean).join(' · ');
 }
 const deviceName = () => settings.deviceName?.trim() || autoDeviceName();
 

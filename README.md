@@ -37,6 +37,7 @@
 - **Shared history**: see what was downloaded on every device and by which one (give each device a name in Settings); titles and links only, never the files
 - **Statistics**: downloads and gigabytes per month, by day and hour, by site, device, quality and format, with a CSV export. Only numbers are kept for them, no titles or links
 - **PIN lock**: optionally keep others on your Wi-Fi out
+- **Works like an app**: install it on the phone's home screen; on Android, share a link from YouTube or any other app straight to Ardite
 - **HTTPS**: an encrypted address for phones, with Ardite's own certificate (set up once per phone, nothing to buy or sign up for)
 - **English and Turkish**, light and dark theme
 
@@ -86,6 +87,7 @@ Updating by hand works too: run `ardite stop` (`stop.bat`), extract the new pack
 
 - On the computer: open **http://localhost:7878**
 - On a phone (same Wi-Fi): scan the QR code shown on the computer
+- As an app: set up the secure connection (below), then use **Settings > Use it like an app** (or **Add to Home Screen** in Safari). On Android, Ardite then appears when you share a link from another app.
 
 Paste a link. The video shows up in a card with all its options: video or audio, quality, trim and subtitles. The download button sums up what you'll get.
 

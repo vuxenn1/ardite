@@ -112,9 +112,13 @@ export async function launchBrowser(executable, args = []) {
           await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: dark ? 'dark' : 'light' }] });
         },
         // a PNG of what the page shows now, for looking at a layout while working on it
-        async screenshot() {
+        // transparent: no white page behind it (for icons with see-through corners)
+        async screenshot({ transparent = false } = {}) {
+          if (transparent) await send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
           return Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64');
         },
+        // a raw DevTools command, e.g. send('Page.getInstallabilityErrors')
+        send,
         close: () => ws.close(),
       };
     },

@@ -721,5 +721,5 @@ legend { padding: 0; margin-bottom: 8px; font-size: 12px; font-weight: 650; colo
 .secure-check.ok { background: var(--blue-soft); color: var(--blue); }
 .secure-open { width: 100%; }
 .secure-open[hidden] { display: none; }
-.secure-go { margin-top: 10px; }
+.secure-go { margin-top: 10px; justify-self: start; align-self: start; }
 #secureBox .qr { margin-top: 12px; }

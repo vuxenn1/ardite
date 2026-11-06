@@ -17,6 +17,41 @@ function openSettings() {
   loadPin();
   loadYtdlp();
   renderSecure();
+  renderApp();
+}
+
+// ---------- use it like an app (install) ----------
+
+// Chrome and Edge offer the install through this event; it's kept for the Install button
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  if (settingsDlg.open) renderApp();
+});
+window.addEventListener('appinstalled', () => {
+  installPrompt = null;
+  if (settingsDlg.open) renderApp();
+});
+const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
+function renderApp() {
+  const box = $('#appBox');
+  const line = (text) => h('p', { class: 'login-status' }, text);
+  if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) return box.replaceChildren(h('p', { class: 'login-status on' }, t('app.installed')));
+  // apps need a secure page: https://, or localhost on the PC itself
+  if (!window.isSecureContext) return box.replaceChildren(line(serverStatus?.https ? t('app.needsSecure') : t('app.needsHttps')));
+  if (installPrompt) {
+    return box.replaceChildren(line(t('app.desc')), h('button', {
+      type: 'button', class: 'secondary-btn secure-go',
+      onclick: async () => {
+        await installPrompt.prompt().catch(() => {});
+        installPrompt = null;
+        renderApp();
+      },
+    }, t('app.install')));
+  }
+  box.replaceChildren(line(isIos ? t('app.ios') : t('app.manual')));
 }
 
 // ---------- secure connection (HTTPS) ----------
