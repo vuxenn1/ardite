@@ -1,5 +1,6 @@
 ' Starts the Ardite server in the background without opening a window.
-' The shortcut in the Windows Startup folder runs this at login.
+' Windows runs this at login (see lib/autostart.js); updates from Ardite 1.8 and older start the
+' new version with it.
 ' Uses the Node.js bundled in runtime\ (release packages), otherwise the installed one.
 Set fso = CreateObject("Scripting.FileSystemObject")
 Set sh = CreateObject("WScript.Shell")

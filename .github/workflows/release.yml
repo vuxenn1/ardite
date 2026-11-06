@@ -43,7 +43,7 @@ jobs:
         run: |
           out=dist/Ardite
           mkdir -p "$out/runtime"
-          cp -r public scripts lib ./*.js package.json LICENSE README.md ./*.bat "$out/"
+          cp -r public scripts lib ./*.js package.json LICENSE README.md ./*.bat ardite.cmd ardite "$out/"
           cp node-dist/*/node.exe "$out/runtime/"
           sed -i -E "s/\"version\": \"[^\"]+\"/\"version\": \"${{ steps.version.outputs.version }}\"/" "$out/package.json"
           # every file in the package, so an update can remove what a newer version no longer has

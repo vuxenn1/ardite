@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readRelease } from '../lib/updater.js';
+import { readRelease as readAny } from '../lib/updater.js';
+
+// the Windows package; which one a system picks is tested in platform.test.js
+const readRelease = (r) => readAny(r, 'Ardite-win64.zip');
 
 const sha = 'a'.repeat(64);
 const release = {
@@ -52,4 +55,10 @@ test('readRelease refuses odd answers', () => {
   // a malformed checksum is ignored rather than trusted
   const bad = { ...release, assets: [{ ...release.assets[1], digest: 'md5:abc' }] };
   assert.equal(readRelease(bad).asset.sha256, null);
+});
+
+test('readRelease only takes the package for this system', () => {
+  assert.equal(readAny(release, 'Ardite-linux-x64.tar.gz').asset, null);
+  assert.equal(readAny(release, null).asset, null);
+  assert.equal(readAny(release, 'Ardite-linux-x64.tar.gz').version, '1.5.0');
 });

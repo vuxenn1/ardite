@@ -4,7 +4,7 @@
 // The parts live in lib/; this file starts them and ties them together.
 import http from 'node:http';
 import fs from 'node:fs';
-import { config, YTDLP, WORK } from './lib/config.js';
+import { config, YTDLP, WORK, PID_FILE } from './lib/config.js';
 import { log } from './lib/log.js';
 import { lanAddresses } from './lib/network.js';
 import { useYtdlpHooks, readVersion, requestYtdlpUpdate } from './lib/ytdlp.js';
@@ -44,6 +44,8 @@ const HOURS_12 = 12 * 60 * 60 * 1000;
 
 server.listen(config.port, config.host, () => {
   log(`Ardite is running at http://localhost:${config.port}`);
+  // for `ardite stop` and `ardite status` (see lib/service.js)
+  fs.writeFileSync(PID_FILE, JSON.stringify({ pid: process.pid, port: config.port }));
   for (const ip of lanAddresses()) log(`  On your phone: http://${ip}:${config.port}`);
   readVersion();
   setTimeout(() => requestYtdlpUpdate('at start'), 5000);
@@ -55,9 +57,17 @@ server.listen(config.port, config.host, () => {
   setInterval(dropStaleInfo, 60000);
 });
 
+// The pid file goes only if it's still this server's
+function removePidFile() {
+  try {
+    if (JSON.parse(fs.readFileSync(PID_FILE, 'utf8')).pid === process.pid) fs.rmSync(PID_FILE, { force: true });
+  } catch { /* not there */ }
+}
+
 function shutdown() {
   stopAllJobs();
   fs.rmSync(WORK, { recursive: true, force: true });
+  removePidFile();
   process.exit(0);
 }
 process.on('SIGINT', shutdown);

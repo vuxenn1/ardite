@@ -5,7 +5,7 @@
 <h1 align="center">Ardite</h1>
 
 <p align="center">
-  A self-hosted video downloader for your Windows PC.<br>
+  A self-hosted video downloader for your computer (Windows, Linux or macOS).<br>
   Open it from any device on the same Wi-Fi, paste a link and the file downloads to that device.
 </p>
 
@@ -33,13 +33,15 @@
 - **GIF**: pick a few seconds and get them as a GIF in three sizes
 - **Subtitles**: pick languages, get them embedded in the video (switch them on or off in your player) or as separate `.srt` files
 - **Playlists**: choose the videos you want and get them as a ZIP
-- **Any device**: scan the QR code on the PC to open Ardite on your phone. Files are saved on whichever device you use.
+- **Any device**: scan the QR code on the computer to open Ardite on your phone. Files are saved on whichever device you use.
 - **Shared history**: see what was downloaded on every device and by which one (give each device a name in Settings); titles and links only, never the files
 - **Statistics**: downloads and gigabytes per month, by day and hour, by site, device, quality and format, with a CSV export. Only numbers are kept for them, no titles or links
 - **PIN lock**: optionally keep others on your Wi-Fi out
 - **English and Turkish**, light and dark theme
 
 ## Installation
+
+### Windows
 
 Requires Windows 10/11. Nothing else to install.
 
@@ -49,29 +51,44 @@ Requires Windows 10/11. Nothing else to install.
 
 This downloads yt-dlp and ffmpeg (each checked against its published SHA-256 hash), makes Ardite start in the background with Windows and opens the firewall for your home network. Ardite keeps yt-dlp up to date by itself (Settings can switch it to daily nightly builds) and updates ffmpeg about once a month.
 
+### Linux and macOS
+
+Requires [Node.js](https://nodejs.org) 20.15 or newer. Download this repository (**Code > Download ZIP**), extract it somewhere permanent and run in that folder:
+
+```sh
+./ardite install
+```
+
+This downloads yt-dlp and ffmpeg for your system (Linux on x64 and ARM, like a Raspberry Pi), starts Ardite and makes it start at login (a systemd user service on Linux, a LaunchAgent on macOS). On macOS, install ffmpeg with [Homebrew](https://brew.sh) (`brew install ffmpeg`), since there's no verified build to download for it. If phones can't connect on Linux, the command tells you how to open the port in your firewall.
+
 ### Updating
 
-Ardite tells you when a new version is out. Press **Update now**: it downloads the new version, checks it, restarts and the page refreshes by itself. Your settings, history and tools are kept. If the new version doesn't start, the previous one is put back automatically (details in `data\update\update.log`).
+Ardite tells you when a new version is out. Press **Update now**: it downloads the new version, checks it, restarts and the page refreshes by itself. Your settings, history and tools are kept. If the new version doesn't start, the previous one is put back automatically (details in `data/update/update.log`). `ardite update` does the same from the command line.
 
-Updating by hand works too: run `stop.bat`, extract the new release over the old folder and run `install.bat` again.
+Updating by hand works too: run `ardite stop` (`stop.bat`), extract the new release over the old folder and run `ardite install` (`install.bat`) again.
 
 ## Usage
 
-- On the PC: open **http://localhost:7878**
-- On a phone (same Wi-Fi): scan the QR code shown on the PC
+- On the computer: open **http://localhost:7878**
+- On a phone (same Wi-Fi): scan the QR code shown on the computer
 
 Paste a link. The video shows up in a card with all its options: video or audio, quality, trim and subtitles. The download button sums up what you'll get.
 
-| Script | What it does |
+Ardite is managed with the `ardite` command in its folder (`ardite.cmd` on Windows, `./ardite` on Linux and macOS). On Windows the `.bat` files do the same with a double-click.
+
+| Command | What it does |
 |---|---|
-| `start.bat` | Start Ardite |
-| `stop.bat` | Stop Ardite |
-| `status.bat` | Show status and addresses |
-| `uninstall.bat` | Remove autostart and the firewall rule |
+| `ardite install` | Download the tools, start Ardite now and at every login, open it (`install.bat`) |
+| `ardite start` / `stop` / `restart` | Start or stop Ardite (`start.bat`, `stop.bat`) |
+| `ardite status` | Show whether it runs and the addresses for a phone (`status.bat`) |
+| `ardite update` | Install the newest version |
+| `ardite autostart on` / `off` | Start Ardite when you log in, or not |
+| `ardite firewall on` / `off` | Let phones through the Windows firewall, or not |
+| `ardite uninstall` | Stop Ardite, remove autostart and the firewall rule (`uninstall.bat`) |
 
 ### PIN lock
 
-By default anyone on your Wi-Fi can open Ardite. To keep others out, set a PIN in **Settings > PIN lock**. Each phone or other device asks for it once and then remembers it; changing the PIN signs them all out. The PC itself never asks, so a forgotten PIN can simply be changed there.
+By default anyone on your Wi-Fi can open Ardite. To keep others out, set a PIN in **Settings > PIN lock**. Each phone or other device asks for it once and then remembers it; changing the PIN signs them all out. The computer Ardite runs on never asks, so a forgotten PIN can simply be changed there.
 
 ### Videos that need a login
 
@@ -101,19 +118,19 @@ Optional settings go in `data/config.json`, for example:
 |---|---|
 | `port` | Address port (`http://localhost:<port>`) |
 | `maxConcurrent` | Downloads running at the same time. Single videos go before playlist items, and one may always start even while a playlist fills every slot |
-| `keepFilesMinutes` | How long finished files wait on the PC to be saved |
+| `keepFilesMinutes` | How long finished files wait on the computer to be saved |
 | `maxPlaylistItems` | Most videos shown for a playlist |
 | `cookiesFromBrowser` | Use a browser's login (`firefox`); set from Settings. Chrome and Edge don't work on Windows |
 | `updateCheck` | Look for new Ardite versions on GitHub |
 | `ytdlpChannel` | `nightly` for a new yt-dlp every day (fixes for changed sites arrive first); set from Settings. Regular releases (`stable`) by default |
-| `tempFolder` | Where downloads wait on the PC until they're saved, e.g. `"D:\\Ardite"` (Windows' temp folder by default) |
+| `tempFolder` | Where downloads wait on the computer until they're saved, e.g. `"D:\\Ardite"` (the system's temp folder by default) |
 | `minFreeGB` | Free space a download needs to start (default 2). A running download stops before the disk drops below half of it |
-| `allowedHosts` | Extra names Ardite may be opened with, e.g. `["mypc.tail1234.ts.net"]`. IP addresses, `localhost` and the PC's own name always work; other names are refused so websites can't use Ardite |
+| `allowedHosts` | Extra names Ardite may be opened with, e.g. `["mypc.tail1234.ts.net"]`. IP addresses, `localhost` and the computer's own name always work; other names are refused so websites can't use Ardite |
 
 <details>
 <summary>Running from source</summary>
 
-Requires [Node.js](https://nodejs.org) 20.15 or newer. Download this repository (**Code > Download ZIP**), extract it and double-click `install.bat`.
+Requires [Node.js](https://nodejs.org) 20.15 or newer. Download this repository (**Code > Download ZIP**), extract it and run `ardite install` (on Windows `install.bat`). Updates then come with `git pull` or a new download.
 
 Run the tests with `node --test` (they also run on every push). They need no internet: a stand-in replaces yt-dlp. The web page tests drive a headless Edge or Chrome and are skipped when neither is installed (`ARDITE_BROWSER` can point to one).
 

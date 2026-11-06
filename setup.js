@@ -1,23 +1,21 @@
-// Downloads the required tools (yt-dlp, ffmpeg, QR library) into bin/ and public/vendor/.
-// Every download is checked against its SHA-256 hash first (see tools.js).
-// Usage: node setup.js          -> downloads whatever is missing, updates yt-dlp
-//        node setup.js --force  -> downloads everything again
+// Downloads the required tools (yt-dlp, ffmpeg, QR library) into bin/ and public/vendor/, in the
+// builds for this system. Every download is checked against its SHA-256 hash first (see tools.js).
+// `ardite install` and updates run this; it can also be run by itself:
+//   node setup.js          -> downloads whatever is missing, updates yt-dlp
+//   node setup.js --force  -> downloads everything again
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { SOURCES, download, installFfmpeg, removeLeftovers } from './lib/tools.js';
-import { readJson } from './lib/config.js';
+import {
+  toolTarget, ytdlpSource, QRCODE_SOURCE, download, installFfmpeg, removeLeftovers,
+} from './lib/tools.js';
+import { readJson, EXE, FFMPEG } from './lib/config.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.join(ROOT, 'bin');
 const VENDOR = path.join(ROOT, 'public', 'vendor');
 const FORCE = process.argv.includes('--force');
-
-if (process.platform !== 'win32') {
-  console.log('This setup script is for Windows. On Linux/macOS, install yt-dlp and ffmpeg with your package manager and put them in bin/.');
-  process.exit(1);
-}
 
 const mb = (n) => (n / 1048576).toFixed(1);
 
@@ -45,9 +43,17 @@ async function main() {
   const removed = removeLeftovers(ROOT);
   if (removed.length) console.log(`  Removed files older versions left behind: ${removed.join(', ')}`);
 
-  const ytdlp = path.join(BIN, 'yt-dlp.exe');
+  const target = toolTarget();
+  const ytdlp = path.join(BIN, 'yt-dlp' + EXE);
+  if (!target && !fs.existsSync(ytdlp)) {
+    console.log(`  There are no ready-made yt-dlp and ffmpeg builds for this system (${process.platform} ${process.arch}).`);
+    console.log(`  Put yt-dlp and ffmpeg (with ffprobe) into ${BIN} yourself, then run this again.`);
+    process.exit(1);
+  }
+
   if (FORCE || !fs.existsSync(ytdlp)) {
-    await download(SOURCES.ytdlp, ytdlp, { onProgress: progress('yt-dlp') });
+    await download(ytdlpSource(target), ytdlp, { onProgress: progress('yt-dlp') });
+    if (process.platform !== 'win32') fs.chmodSync(ytdlp, 0o755);
     ok('yt-dlp');
   } else {
     // yt-dlp checks its own updates against the same checksum list. It follows the channel picked
@@ -59,20 +65,29 @@ async function main() {
     } catch { /* the current version still works if the update fails */ }
   }
 
-  if (FORCE || !fs.existsSync(path.join(BIN, 'ffmpeg.exe')) || !fs.existsSync(path.join(BIN, 'ffprobe.exe'))) {
+  const ffmpegHere = fs.existsSync(path.join(BIN, 'ffmpeg' + EXE)) && fs.existsSync(path.join(BIN, 'ffprobe' + EXE));
+  if (target?.ffmpeg && (FORCE || !ffmpegHere)) {
     await installFfmpeg(BIN, {
+      target,
       onProgress: progress('ffmpeg'),
       onExtract: () => process.stdout.write('\r  ffmpeg: verified, extracting...                    '),
     });
     ok('ffmpeg');
-  } else {
+  } else if (ffmpegHere) {
     console.log('  ffmpeg already installed (Ardite updates it about once a month).');
+  } else if (fs.existsSync(FFMPEG)) {
+    console.log(`  Using the ffmpeg installed on this system (${path.dirname(FFMPEG)}).`);
+  } else {
+    console.log('  ffmpeg is missing. Ardite works without it, but can\'t join the best video with its sound,');
+    console.log(process.platform === 'darwin'
+      ? '  make GIFs or add subtitles. Install it with Homebrew: brew install ffmpeg'
+      : `  make GIFs or add subtitles. Put ffmpeg and ffprobe into ${BIN}.`);
   }
 
   const qr = path.join(VENDOR, 'qrcode.js');
   if (FORCE || !fs.existsSync(qr)) {
     try {
-      await download(SOURCES.qrcode, qr);
+      await download(QRCODE_SOURCE, qr);
       ok('QR library');
     } catch (e) {
       console.log('  Could not download the QR library (not critical, only the QR code will be missing): ' + e.message);
