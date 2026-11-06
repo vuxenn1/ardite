@@ -37,6 +37,7 @@
 - **Shared history**: see what was downloaded on every device and by which one (give each device a name in Settings); titles and links only, never the files
 - **Statistics**: downloads and gigabytes per month, by day and hour, by site, device, quality and format, with a CSV export. Only numbers are kept for them, no titles or links
 - **PIN lock**: optionally keep others on your Wi-Fi out
+- **HTTPS**: an encrypted address for phones, with Ardite's own certificate (set up once per phone, nothing to buy or sign up for)
 - **English and Turkish**, light and dark theme
 
 ## Installation
@@ -104,6 +105,12 @@ Ardite is managed with the `ardite` command in its folder (`ardite.cmd` on Windo
 
 By default anyone on your Wi-Fi can open Ardite. To keep others out, set a PIN in **Settings > PIN lock**. Each phone or other device asks for it once and then remembers it; changing the PIN signs them all out. The computer Ardite runs on never asks, so a forgotten PIN can simply be changed there.
 
+### Secure connection (HTTPS)
+
+Ardite answers on `https://` too, on the same port. Browsers only trust it once the device has Ardite's certificate, which takes a minute per phone: open **Settings > Secure connection** on the computer, scan the code with the phone and follow the steps it shows for Android, iPhone or a computer. When the page says **Done**, open the secure address.
+
+The certificate is made on your computer the first time Ardite starts (in `data/tls`) and only works for Ardite on your home network (private addresses, `localhost` and `*.local` names). It can't be used to impersonate any other website. Set `"https": false` in the settings file to turn HTTPS off.
+
 ### Videos that need a login
 
 Some videos (age-restricted or private) require you to be signed in, and YouTube sometimes asks to confirm you're not a bot after many downloads. Add your login in **Settings > Videos that need a login**:
@@ -136,6 +143,7 @@ Optional settings go in `data/config.json`, for example:
 | `maxPlaylistItems` | Most videos shown for a playlist |
 | `cookiesFromBrowser` | Use a browser's login (`firefox`); set from Settings. Chrome and Edge don't work on Windows |
 | `updateCheck` | Look for new Ardite versions on GitHub |
+| `https` | `false` turns off the `https://` address (on by default, see Secure connection) |
 | `ytdlpChannel` | `nightly` for a new yt-dlp every day (fixes for changed sites arrive first); set from Settings. Regular releases (`stable`) by default |
 | `tempFolder` | Where downloads wait on the computer until they're saved, e.g. `"D:\\Ardite"` (the system's temp folder by default) |
 | `minFreeGB` | Free space a download needs to start (default 2). A running download stops before the disk drops below half of it |

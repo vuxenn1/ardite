@@ -21,7 +21,8 @@ export function findBrowser() {
   return candidates.find((p) => p && fs.existsSync(p)) || null;
 }
 
-export async function launchBrowser(executable) {
+// args: extra command line switches, e.g. to trust a test certificate
+export async function launchBrowser(executable, args = []) {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'ardite-browser-'));
   const port = await freePort();
   const proc = spawn(executable, [
@@ -29,6 +30,7 @@ export async function launchBrowser(executable) {
     '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--window-size=1280,900',
     // the browser's own built-in extensions run scripts on every page and sometimes fail there
     '--disable-extensions', '--disable-component-extensions-with-background-pages',
+    ...args,
     'about:blank',
   ], { stdio: 'ignore' });
   const devtools = `http://127.0.0.1:${port}`;

@@ -708,3 +708,18 @@ legend { padding: 0; margin-bottom: 8px; font-size: 12px; font-weight: 650; colo
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* the secure connection page (/secure) */
+.secure-page { grid-area: main; padding: 22px 20px; }
+.secure-page h1 { margin: 0 0 6px; font-size: 22px; }
+.secure-page > p { margin: 0 0 16px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.secure-os { margin-bottom: 16px; }
+.secure-os button { flex: 1; padding: 8px 10px; }
+.secure-steps { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 12px; font-size: 14px; line-height: 1.5; }
+.secure-steps .primary-btn { margin: 2px 0; }
+.secure-check { margin: 0 0 12px !important; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); font-weight: 600; font-size: 14px; }
+.secure-check.ok { background: var(--blue-soft); color: var(--blue); }
+.secure-open { width: 100%; }
+.secure-open[hidden] { display: none; }
+.secure-go { margin-top: 10px; }
+#secureBox .qr { margin-top: 12px; }

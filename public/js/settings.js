@@ -16,6 +16,28 @@ function openSettings() {
   loadLogin();
   loadPin();
   loadYtdlp();
+  renderSecure();
+}
+
+// ---------- secure connection (HTTPS) ----------
+
+// On the PC: a QR code that opens the setup page (/secure) on a phone. On another device: a link
+// to it. Over https:// already: just that it's secure.
+function renderSecure() {
+  const set = $('#secureSet');
+  const lan = serverStatus?.lan?.[0];
+  set.hidden = !serverStatus?.https || (isLocalHost && !lan);
+  if (set.hidden) return;
+  const box = $('#secureBox');
+  if (location.protocol === 'https:') return box.replaceChildren(h('p', { class: 'login-status on' }, t('secure.already')));
+  if (!isLocalHost) {
+    return box.replaceChildren(h('p', { class: 'login-status' }, t('secure.set.device')),
+      h('a', { class: 'secondary-btn secure-go', href: '/secure' }, t('secure.set.go')));
+  }
+  const url = `${lan}/secure`;
+  const qr = h('div', { class: 'qr' });
+  qr.innerHTML = qrSvg(url);
+  box.replaceChildren(h('p', { class: 'login-status' }, t('secure.set.pc')), qr, h('code', { class: 'lan-url' }, url));
 }
 
 // This device's name in the history and statistics (empty: the made-up one, shown as placeholder)
@@ -207,8 +229,8 @@ function renderPin() {
     h('p', { class: 'login-status' + (pinState.pin ? ' on' : '') }, pinState.pin ? t('pin.on', pinState.devices) : t('pin.off')),
     h('div', { class: 'pin-row' }, input,
       h('button', { type: 'button', class: 'hist-btn', onclick: () => savePin(input.value) }, t(pinState.pin ? 'pin.change' : 'pin.set'))),
-    pinState.pin && h('div', { class: 'login-actions' },
-      h('button', { type: 'button', class: 'hist-btn', onclick: removePin }, t('pin.remove'))),
+    pinState.pin ? h('div', { class: 'login-actions' },
+      h('button', { type: 'button', class: 'hist-btn', onclick: removePin }, t('pin.remove'))) : '',
     h('p', { class: 'tiny login-help' }, t('pin.help')));
 }
 

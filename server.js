@@ -12,6 +12,7 @@ import { infoBusy, dropStaleInfo } from './lib/info.js';
 import { idle, jobsRunning, pump, stopAllJobs } from './lib/jobs.js';
 import { createUpdates } from './lib/updates.js';
 import { createRoutes } from './lib/routes.js';
+import { createServer } from './lib/tls.js';
 import { listHistory } from './lib/history.js';
 import { seedStats } from './lib/stats.js';
 
@@ -27,7 +28,9 @@ seedStats(listHistory());
 useYtdlpHooks({ isFree: () => !jobsRunning() && !infoBusy(), afterUpdate: pump });
 
 const updates = createUpdates({ isIdle: idle, shutdown });
-const server = http.createServer(createRoutes({ updates }));
+// http:// and https:// on the same port ("https": false in data/config.json leaves HTTPS out)
+const routes = createRoutes({ updates });
+const server = config.https === false ? http.createServer(routes) : createServer(routes);
 
 fs.rmSync(WORK, { recursive: true, force: true });
 fs.mkdirSync(WORK, { recursive: true });
@@ -47,6 +50,7 @@ server.listen(config.port, config.host, () => {
   // for `ardite stop` and `ardite status` (see lib/service.js)
   fs.writeFileSync(PID_FILE, JSON.stringify({ pid: process.pid, port: config.port }));
   for (const ip of lanAddresses()) log(`  On your phone: http://${ip}:${config.port}`);
+  if (config.https !== false) log('  https:// works too, once a phone has the Ardite certificate (Settings > Secure connection)');
   readVersion();
   setTimeout(() => requestYtdlpUpdate('at start'), 5000);
   setInterval(() => requestYtdlpUpdate('twice a day'), HOURS_12);

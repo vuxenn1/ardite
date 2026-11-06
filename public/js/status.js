@@ -4,13 +4,19 @@
 
 // isTouch and isLocalHost are defined in base.js
 
-function renderQr(url) {
-  for (const el of $$('[data-lan]')) el.textContent = url;
-  if (typeof window.qrcode !== 'function') return;
+// A QR code as SVG markup ('' while the QR library hasn't loaded)
+function qrSvg(url) {
+  if (typeof window.qrcode !== 'function') return '';
   const qr = window.qrcode(0, 'M');
   qr.addData(url);
   qr.make();
-  for (const el of $$('[data-qr]')) el.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+  return qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+}
+
+function renderQr(url) {
+  for (const el of $$('[data-lan]')) el.textContent = url;
+  const svg = qrSvg(url);
+  for (const el of $$('[data-qr]')) el.innerHTML = svg;
 }
 
 let serverStatus = null;

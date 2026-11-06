@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0b0c" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f7f6f4" media="(prefers-color-scheme: light)">
+  <title>Ardite</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script>
+    try {
+      const t = JSON.parse(localStorage.getItem('ardite.settings') || '{}').theme;
+      if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    } catch {}
+  </script>
+</head>
+<body>
+  <div class="layout">
+    <header class="top">
+      <a class="brand" href="/" data-i18n-attr="aria-label:home">
+        <img src="/icon.svg" alt="" width="30" height="30">
+        <span>ardite</span>
+      </a>
+    </header>
+
+    <main class="card secure-page">
+      <h1 data-i18n="secure.title"></h1>
+      <p data-i18n="secure.intro"></p>
+
+      <div class="mini-seg secure-os" role="tablist">
+        <button type="button" data-os="android">Android</button>
+        <button type="button" data-os="ios">iPhone / iPad</button>
+        <button type="button" data-os="pc" data-i18n="secure.os.pc"></button>
+      </div>
+
+      <ol class="secure-steps" id="steps"></ol>
+
+      <p id="secureCheck" class="secure-check" role="status"></p>
+      <a id="secureOpen" class="primary-btn secure-open" hidden data-i18n="secure.open"></a>
+      <p class="tiny" data-i18n="secure.safe"></p>
+    </main>
+  </div>
+
+  <script src="/i18n.js"></script>
+  <script src="/secure.js"></script>
+</body>
+</html>

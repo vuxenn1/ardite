@@ -83,3 +83,15 @@ test('every error code and phase the server sends has a text', () => {
   const missing = [...codes].filter((k) => !(k in STRINGS.en));
   assert.deepEqual(missing, []);
 });
+
+test('the secure connection page has all its texts', () => {
+  const html = read('secure.html');
+  const used = [...html.matchAll(/data-i18n(?:-html)?="([^"]+)"/g)].map((m) => m[1]);
+  const script = read('secure.js');
+  for (const m of script.matchAll(/(?<![\w.$])t\('([\w.-]+)'/g)) used.push(m[1]);
+  // the steps for each kind of device: secure.<os>.1 to secure.<os>.<count>
+  const steps = JSON.parse(/const STEPS = (\{[^}]+\})/.exec(script)[1].replace(/(\w+):/g, '"$1":'));
+  for (const [os, n] of Object.entries(steps)) for (let i = 1; i <= n; i++) used.push(`secure.${os}.${i}`);
+  assert.ok(used.length > 15);
+  assert.deepEqual(used.filter((k) => !(k in STRINGS.en)), []);
+});

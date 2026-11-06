@@ -4,6 +4,8 @@
 // The app folder needs bin/yt-dlp(.exe); runtime/node(.exe) is used when it's there.
 import fs from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -81,6 +83,23 @@ try {
   check(missing.status === 404 && JSON.parse(missing.text).code === 'jobNotFound', 'unknown download is a 404');
   const escape = await get('/..%2f..%2fserver.js');
   check(escape.status === 403 || escape.status === 404, 'files outside public/ are not served');
+
+  // HTTPS on the same port, with the certificate phones install (and a page that explains how)
+  check(status.https === true, 'HTTPS is on');
+  const crt = await new Promise((resolve, reject) => http.get(`${base}/ardite.crt`, (res) => {
+    const chunks = [];
+    res.on('data', (c) => chunks.push(c));
+    res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks) }));
+  }).on('error', reject));
+  check(crt.status === 200 && new crypto.X509Certificate(crt.body).ca, 'serves the certificate for phones');
+  const secure = await new Promise((resolve) => https.get(`https://127.0.0.1:${port}/api/status`,
+    { ca: new crypto.X509Certificate(crt.body).toString(), agent: false }, (res) => {
+      let text = '';
+      res.on('data', (d) => (text += d));
+      res.on('end', () => resolve(text));
+    }).on('error', (e) => resolve(e.message)));
+  check(/"name":"Ardite"/.test(secure), `answers on https:// with that certificate (${secure.slice(0, 60)})`);
+  check((await get('/secure')).status === 200, 'serves the HTTPS setup page');
 
   // other websites can't use Ardite
   check((await raw('/api/history', 'GET', { Host: `evil.example:${port}` })).status === 403, 'refuses a foreign address (DNS rebinding)');
